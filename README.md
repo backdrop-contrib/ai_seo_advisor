@@ -3,7 +3,7 @@
 
 ## What does it do?
 -----------------
-OpenAI SEO Advisor provides a Yoast-like SEO analysis panel on node edit forms for Backdrop CMS. The module performs local, rules-based checks (title length, meta description, word count, headings, internal links, image alt text, etc.) and depends on the contrib `openai` module to produce AI suggestions and full HTML SEO/AEO audits. A configured OpenAI API key is required for normal operation.
+OpenAI SEO Advisor provides a SEO analysis panel on node edit forms for Backdrop CMS. The module performs local, rules-based checks (title length, meta description, word count, headings, internal links, image alt text, etc.) and depends on the contrib `openai` module to produce AI suggestions and full HTML SEO/AEO audits. A configured OpenAI API key is required for normal operation.
 
 For site administrators, OpenAI SEO Advisor provides on-page recommendations that include AI-powered title/description/keyword suggestions and a prioritized audit when the OpenAI integration is configured. The module never auto-applies changes — Apply buttons only set form values client-side or via `form_state`.
 
