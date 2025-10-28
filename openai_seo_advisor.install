@@ -17,39 +17,43 @@ function openai_seo_advisor_install() {
   foreach ($types as $type) {
     $enabled_bundles[$type->type] = 1;
   }
+
+  // Only set enabled_bundles dynamically here. Static defaults (thresholds,
+  // weights, checks_enabled, options) are provided via config/install JSON so
+  // Backdrop will import them when the module is enabled. This avoids
+  // duplicating defaults in code and keeps configuration manageable.
   $config->set('enabled_bundles', $enabled_bundles);
-
-  // Default thresholds and weights.
-  $config->set('thresholds', array(
-    'score_green' => 80,
-    'score_amber' => 50,
-    'min_word_count' => 300,
-    'title_min' => 10,
-    'title_max' => 60,
-    'description_min' => 140,
-    'description_max' => 160,
-  ));
-  $config->set('weights', array(
-    'keyword_in_title' => 15,
-    'keyword_in_body' => 10,
-    'title_length' => 15,
-    'description_length' => 15,
-    'word_count' => 15,
-    'headings' => 15,
-    'internal_links' => 10,
-    'images_alt' => 5,
-  ));
-
-  // Defaults for feature toggles (MVP all on).
-  $config->set('checks_enabled', array(
-    'keyword' => 1,
-    'title_length' => 1,
-    'description_length' => 1,
-    'word_count' => 1,
-    'headings' => 1,
-    'internal_links' => 1,
-    'images_alt' => 1,
-  ));
-
   $config->save();
+}
+
+/**
+ * Implements hook_requirements().
+ */
+function openai_seo_advisor_requirements($phase) {
+  $requirements = array();
+
+  // Only check on install/update (runtime) phases.
+  if ($phase === 'runtime') {
+    // The module depends on contrib OpenAI for AI suggestions which are
+    // currently mandatory. If the openai module is missing or disabled show a
+    // error in the status report and admin pages.
+    if (!module_exists('openai')) {
+      $requirements['openai_seo_advisor_openai_dependency'] = array(
+        'title' => t('OpenAI module dependency'),
+        'value' => t('Missing'),
+        'severity' => REQUIREMENT_ERROR,
+        'description' => t('The OpenAI SEO Advisor module requires the contributed OpenAI module to be installed and enabled because AI suggestions are not optional in this release.'),
+      );
+    }
+    else {
+      $requirements['openai_seo_advisor_openai_dependency'] = array(
+        'title' => t('OpenAI module dependency'),
+        'value' => t('Present'),
+        'severity' => REQUIREMENT_OK,
+        'description' => t('The OpenAI module is available.'),
+      );
+    }
+  }
+
+  return $requirements;
 }

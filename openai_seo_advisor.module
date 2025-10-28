@@ -242,7 +242,7 @@ function openai_seo_advisor_settings_form($form, &$form_state) {
   $opts_cfg = is_array(config_get('openai_seo_advisor.settings', 'options')) ? config_get('openai_seo_advisor.settings', 'options') : array();
   $form['options']['enable_aeo_checks'] = array(
     '#type' => 'checkbox',
-    '#title' => t('Enable AEO checks (experimental)'),
+    '#title' => t('Enable AEO checks'),
     '#default_value' => !empty($opts_cfg['enable_aeo_checks']) ? 1 : 0,
     '#description' => t('Run heuristic Answer Engine Optimization checks (featured snippet candidate, question headings, FAQ/HowTo schema, etc.). Off by default.'),
   );
