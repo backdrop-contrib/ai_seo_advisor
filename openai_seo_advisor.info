@@ -3,7 +3,5 @@ description = Provides a SEO analysis panel on node edit forms, with rules-based
 package = OpenAI
 type = module
 backdrop = 1.x
+dependencies[] = openai
 configure = admin/config/openai/seo
-
-; Dependencies are optional for MVP; do not alter contrib.
-; We reuse general Backdrop APIs and may coexist with Metatag.
