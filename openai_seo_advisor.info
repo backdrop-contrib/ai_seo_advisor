@@ -1,5 +1,5 @@
 name = OpenAI SEO Advisor
-description = Provides a Yoast-like SEO analysis panel on node edit forms, with rules-based checks and optional AI suggestions (future phase).
+description = Provides a SEO analysis panel on node edit forms, with rules-based checks and AI suggestions.
 package = OpenAI
 type = module
 backdrop = 1.x
