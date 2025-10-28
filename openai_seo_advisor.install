@@ -1,0 +1,55 @@
+<?php
+
+/**
+ * @file
+ * Install and update hooks for OpenAI SEO Advisor.
+ */
+
+/**
+ * Implements hook_install().
+ */
+function openai_seo_advisor_install() {
+  $config = config('openai_seo_advisor.settings');
+
+  // Initialize enabled_bundles: enable for all node types by default.
+  $types = node_type_get_types();
+  $enabled_bundles = array();
+  foreach ($types as $type) {
+    $enabled_bundles[$type->type] = 1;
+  }
+  $config->set('enabled_bundles', $enabled_bundles);
+
+  // Default thresholds and weights.
+  $config->set('thresholds', array(
+    'score_green' => 80,
+    'score_amber' => 50,
+    'min_word_count' => 300,
+    'title_min' => 10,
+    'title_max' => 60,
+    'description_min' => 140,
+    'description_max' => 160,
+  ));
+  $config->set('weights', array(
+    'keyword_in_title' => 15,
+    'keyword_in_body' => 10,
+    'title_length' => 15,
+    'description_length' => 15,
+    'word_count' => 15,
+    'headings' => 15,
+    'internal_links' => 10,
+    'images_alt' => 5,
+  ));
+
+  // Defaults for feature toggles (MVP all on).
+  $config->set('checks_enabled', array(
+    'keyword' => 1,
+    'title_length' => 1,
+    'description_length' => 1,
+    'word_count' => 1,
+    'headings' => 1,
+    'internal_links' => 1,
+    'images_alt' => 1,
+  ));
+
+  $config->save();
+}
