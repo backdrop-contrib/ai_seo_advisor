@@ -1,0 +1,187 @@
+<?php
+/**
+ * @file
+ * Install, update and uninstall functions for the OpenAI SEO Advisor module.
+ */
+
+/**
+ * Implements hook_schema().
+ */
+function openai_seo_advisor_schema() {
+  $schema = array();
+
+  $schema['openai_seo_report'] = array(
+    'description' => 'Stores SEO analysis reports for content.',
+    'fields' => array(
+      'report_id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+        'description' => 'Primary Key: Unique report ID.',
+      ),
+      'entity_type' => array(
+        'type' => 'varchar',
+        'length' => 128,
+        'not null' => TRUE,
+        'default' => 'node',
+        'description' => 'The entity type (e.g., node).',
+      ),
+      'entity_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+        'description' => 'The entity ID.',
+      ),
+      'report_type' => array(
+        'type' => 'varchar',
+        'length' => 64,
+        'not null' => TRUE,
+        'default' => 'seo_analysis',
+        'description' => 'The report type machine name.',
+      ),
+      'title' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+        'description' => 'The content title at time of analysis.',
+      ),
+      'focus_keyword' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => FALSE,
+        'description' => 'The focus keyword used for analysis.',
+      ),
+      'score' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+        'description' => 'The overall SEO score (0-100).',
+      ),
+      'status' => array(
+        'type' => 'varchar',
+        'length' => 16,
+        'not null' => TRUE,
+        'default' => 'RED',
+        'description' => 'The status: GREEN, AMBER, or RED.',
+      ),
+      'report_data' => array(
+        'type' => 'blob',
+        'size' => 'big',
+        'not null' => FALSE,
+        'serialize' => TRUE,
+        'description' => 'Serialized report data (checks, recommendations, AI suggestions, etc.).',
+      ),
+      'html_snapshot' => array(
+        'type' => 'text',
+        'size' => 'big',
+        'not null' => FALSE,
+        'description' => 'HTML snapshot used for analysis.',
+      ),
+      'uid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+        'description' => 'The user ID who generated the report.',
+      ),
+      'created' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+        'description' => 'The Unix timestamp when the report was created.',
+      ),
+      'changed' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+        'description' => 'The Unix timestamp when the report was last changed.',
+      ),
+    ),
+    'primary key' => array('report_id'),
+    'indexes' => array(
+      'entity_type' => array('entity_type'),
+      'entity_id' => array('entity_id'),
+      'report_type' => array('report_type'),
+      'uid' => array('uid'),
+      'created' => array('created'),
+      'entity' => array('entity_type', 'entity_id'),
+    ),
+  );
+
+  return $schema;
+}
+
+/**
+ * Implements hook_install().
+ */
+function openai_seo_advisor_install() {
+  // Report types are now loaded from individual config files.
+  // They are automatically imported from the config/ directory.
+}
+
+/**
+ * Remove unused columns from openai_seo_report table.
+ */
+function openai_seo_advisor_update_1001() {
+  // Drop focus_keyword, score, and status columns - we don't use them anymore
+  if (db_field_exists('openai_seo_report', 'focus_keyword')) {
+    db_drop_field('openai_seo_report', 'focus_keyword');
+  }
+  if (db_field_exists('openai_seo_report', 'score')) {
+    db_drop_field('openai_seo_report', 'score');
+  }
+  if (db_field_exists('openai_seo_report', 'status')) {
+    db_drop_field('openai_seo_report', 'status');
+  }
+  
+  return t('Removed deprecated columns from openai_seo_report table.');
+}
+
+/**
+ * Migrate from combined report_types config to individual config files.
+ */
+function openai_seo_advisor_update_1000() {
+  // Check if old combined config exists.
+  $old_config = config('openai_seo_advisor.report_types');
+  $types = $old_config->get();
+  
+  if (!empty($types) && is_array($types)) {
+    // Migrate each report type to its own config file.
+    foreach ($types as $name => $type_data) {
+      if (is_array($type_data) && !empty($type_data['name'])) {
+        $new_config = config('openai_seo_advisor.report_type.' . $name);
+        $new_config->set('_config_name', 'openai_seo_advisor.report_type.' . $name);
+        $new_config->set('name', $type_data['name']);
+        $new_config->set('label', !empty($type_data['label']) ? $type_data['label'] : $name);
+        $new_config->set('description', !empty($type_data['description']) ? $type_data['description'] : '');
+        $new_config->set('prompt', !empty($type_data['prompt']) ? $type_data['prompt'] : '');
+        $new_config->set('status', !empty($type_data['status']) ? 1 : 0);
+        $new_config->set('weight', !empty($type_data['weight']) ? (int)$type_data['weight'] : 0);
+        $new_config->save();
+      }
+    }
+    
+    // Delete the old combined config.
+    $old_config->delete();
+    
+    return t('Migrated report types from combined config to individual config files.');
+  }
+  
+  return t('No migration needed - already using individual config files.');
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function openai_seo_advisor_uninstall() {
+  // Remove all report type configurations (individual files).
+  $config_names = config_get_names_with_prefix('openai_seo_advisor.report_type.');
+  foreach ($config_names as $config_name) {
+    config($config_name)->delete();
+  }
+  
+  // Remove settings.
+  config('openai_seo_advisor.settings')->delete();
+  
+  // Remove old combined config if it exists.
+  config('openai_seo_advisor.report_types')->delete();
+}

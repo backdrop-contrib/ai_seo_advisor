@@ -3,16 +3,28 @@
 
 ## What does it do?
 -----------------
-OpenAI SEO Advisor provides a SEO analysis panel on node edit forms for Backdrop CMS. The module performs local, rules-based checks (title length, meta description, word count, headings, internal links, image alt text, etc.) and depends on the contrib `openai` module to produce AI suggestions and full HTML SEO/AEO audits. A configured OpenAI API key is required for normal operation.
+OpenAI SEO Advisor provides a SEO analysis panel on node edit forms for Backdrop CMS. Checks are defined by config-driven report types (see `config/openai_seo_advisor.report_type.*.json`); many checks and full audits are generated via AI-driven report templates and therefore require the contrib `openai` module and a configured OpenAI API key.
 
 For site administrators, OpenAI SEO Advisor provides on-page recommendations that include AI-powered title/description/keyword suggestions and a prioritized audit when the OpenAI integration is configured. The module never auto-applies changes — Apply buttons only set form values client-side or via `form_state`.
 
 ## Key features
 ------------
-- Rules-only SEO checks with tunable thresholds and per-check weights (config stored in `openai_seo_advisor.settings`).
-- AI suggestions and full audits via the contrib `openai` module are required for the module's AI-driven features (the module uses the `OpenAIApi` class).
+- Config-driven report types and checks with tunable thresholds and per-check weights (config stored in `openai_seo_advisor.settings`). Many checks and full audits are implemented via report-type templates and require the contrib `openai` module; the module uses the `OpenAIApi` class for AI-driven checks.
+- Note: this module no longer provides a separate rules-only analysis path — report types drive the checks, and several report types rely on AI to produce results.
 - Preview-based analysis: the module prefers generated preview HTML (view mode `full`) for most heuristics and AI inputs.
 - AJAX Analyze button and collapsible HTML audit output when AI full-audit is enabled.
+
+Config files
+------------
+- Report types are defined in JSON files under the `config/` directory as `openai_seo_advisor.report_type.*.json`. Recent changes add or modify several report-type definitions — edit or add these JSONs to change the available report/audit types.
+- The current repository includes the following report-type files in `config/`:
+  - `openai_seo_advisor.report_type.full.json`
+  - `openai_seo_advisor.report_type.headings_and_structure.json`
+  - `openai_seo_advisor.report_type.link_analysis.json`
+  - `openai_seo_advisor.report_type.natural_language.json`
+  - `openai_seo_advisor.report_type.schema_org_markup.json`
+  - `openai_seo_advisor.report_type.topic_authority.json`
+- Module-wide settings (schema and defaults) are stored in `config/openai_seo_advisor.settings.json`. When you add or change report types, ensure the settings schema and any UI lists that enumerate reports are updated accordingly.
 
 Getting started
 ---------------
@@ -31,17 +43,16 @@ Getting started
 ## Important config keys and places to look
 --------------------------------------
 - Settings form: `openai_seo_advisor_settings_form()` (defined in `openai_seo_advisor.module`) — see defaults for thresholds, weights and `options` like `ai_model`, `ai_max_tokens`, and `ai_full_audit_mode`.
-- Settings storage: `openai_seo_advisor.settings` (Backrop config API via `system_settings_form` binding).
+- Settings storage: `openai_seo_advisor.settings` (Backdrop config API via `system_settings_form` binding).
 - Admin path: `admin/config/openai/seo` (defined in `.info` and menu implementation).
 - Main logic functions:
-  - `openai_seo_advisor_analyze()` — rules engine that returns score, status and checks
-  - `openai_seo_advisor_generate_ai_suggestions()` — compact JSON suggestions via contrib OpenAI
-  - `openai_seo_advisor_generate_ai_audit()` — long-form HTML audit prompt to the AI
+  - `openai_seo_advisor_analyze()` — orchestration function that selects the configured report type, runs the report's checks (which may include AI calls) and returns the report object (score, status, checks, etc.)
+  - `openai_seo_advisor_generate_ai_suggestions()` — generate AI-driven suggestions and HTML report content for a selected report type (returns an array with an `html_report` key when available).
   - `openai_seo_advisor_build_preview_html()` — builds preview HTML used for analysis
 
 ## Developer notes and conventions
 -------------------------------
-- The module intentionally performs rule-only checks locally and marks AI as optional; AI calls always check `module_exists('openai')` and the presence of the configured API key.
+- The module's checks are driven by report-type JSONs; many reports produce results via AI. AI calls are still gated: always check `module_exists('openai')` and presence of an API key before attempting AI-driven reports. The module treats AI output as suggestions only; Apply handlers only update `form_state` or form values.
 - AI outputs are treated as suggestions only. The Apply AJAX handlers set form values or update `form_state` — nothing is persisted without author action.
 - The module logs sanitized AI input only when `options.log_ai_input` is enabled; this is intended for development sites only.
 - Parsing strategy: prefer `DOMDocument` where available, but use regex fallbacks so analysis still works in constrained environments.

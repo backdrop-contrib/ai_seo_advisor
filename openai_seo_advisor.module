@@ -3,18 +3,27 @@
  * @file
  * OpenAI SEO Advisor module.
  *
- * Provides a Yoast-like SEO analysis panel on node edit forms. Performs
- * rules-only checks locally and can optionally request AI suggestions from
- * the contrib OpenAI module when enabled in settings. Never modifies contrib.
+ * Provides a SEO analysis panel on node edit forms. Analysis is driven by
+ * config-defined report types (see `config/openai_seo_advisor.report_type.*.json`).
+ * Many report types are AI-driven and require the contrib OpenAI module when
+ * enabled in settings. The module treats AI output as suggestions only.
  */
+
+/**
+ * Implements hook_autoload_info().
+ */
+function openai_seo_advisor_autoload_info() {
+  return array(
+    'OpenAISEOReport' => 'includes/openai_seo_report.entity.inc',
+    'OpenAISEOReportController' => 'includes/openai_seo_report.entity.inc',
+  );
+}
 
 /**
  * Implements hook_init().
  */
 function openai_seo_advisor_init() {
-  // Hide preview warning messages inside the results wrapper; use !important
-  // so theme or other CSS cannot override this inline rule.
-  $css = '#openai-seo-advisor-results .messages.warning { display: none !important; }';
+  $css = '#openai-seo-advisor-results .messages.warning, #openai-seo-advisor-results .messages.messages--warning { display: none !important; }';
   backdrop_add_css($css, array('type' => 'inline'));
 }
 
@@ -27,11 +36,75 @@ function openai_seo_advisor_permission() {
       'title' => t('Analyze content SEO with OpenAI'),
       'description' => t('Use the SEO Advisor panel on node forms and run analysis.'),
     ),
+    'view openai seo reports' => array(
+      'title' => t('View OpenAI SEO reports'),
+      'description' => t('View saved SEO analysis reports on content pages.'),
+    ),
     'administer openai seo settings' => array(
       'title' => t('Administer OpenAI SEO Advisor settings'),
       'description' => t('Configure the OpenAI SEO Advisor module.'),
     ),
   );
+}
+
+/**
+ * Implements hook_entity_info().
+ */
+function openai_seo_advisor_entity_info() {
+  $info = array();
+
+  $info['openai_seo_report'] = array(
+    'label' => t('SEO Report'),
+    'plural label' => t('SEO Reports'),
+    'entity class' => 'OpenAISEOReport',
+    'controller class' => 'OpenAISEOReportController',
+    'base table' => 'openai_seo_report',
+    'fieldable' => FALSE,
+    'entity keys' => array(
+      'id' => 'report_id',
+    ),
+    'bundles' => array(),
+    'view modes' => array(
+      'full' => array(
+        'label' => t('Full report'),
+        'custom settings' => FALSE,
+      ),
+    ),
+    'module' => 'openai_seo_advisor',
+    'access callback' => 'openai_seo_advisor_report_access',
+  );
+
+  return $info;
+}
+
+/**
+ * Access callback for SEO reports.
+ */
+function openai_seo_advisor_report_access($op, $report = NULL, $account = NULL) {
+  if (empty($account)) {
+    global $user;
+    $account = $user;
+  }
+
+  if (user_access('administer openai seo settings', $account)) {
+    return TRUE;
+  }
+
+  if ($op == 'view' && user_access('view openai seo reports', $account)) {
+    return TRUE;
+  }
+
+  if ($op == 'create' && user_access('analyze content seo with openai', $account)) {
+    return TRUE;
+  }
+
+  if ($op == 'update' || $op == 'delete') {
+    if (user_access('administer openai seo settings', $account)) {
+      return TRUE;
+    }
+  }
+
+  return FALSE;
 }
 
 /**
@@ -43,1378 +116,204 @@ function openai_seo_advisor_menu() {
   $items['admin/config/openai/seo'] = array(
     'title' => 'OpenAI SEO Advisor',
     'description' => 'Configure the SEO analysis panel and AI suggestions.',
-    'page callback' => 'drupal_get_form',
+    'page callback' => 'backdrop_get_form',
     'page arguments' => array('openai_seo_advisor_settings_form'),
     'access arguments' => array('administer openai seo settings'),
+    'file' => 'openai_seo_advisor.admin.inc',
     'type' => MENU_NORMAL_ITEM,
-    'file' => 'openai_seo_advisor.module',
+  );
+
+  $items['admin/config/openai/seo/settings'] = array(
+    'title' => 'Settings',
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+    'weight' => -10,
+  );
+
+  $items['admin/config/openai/seo/report-types'] = array(
+    'title' => 'Report Types',
+    'description' => 'Manage SEO report type configurations.',
+    'page callback' => 'openai_seo_advisor_report_types_list',
+    'access arguments' => array('administer openai seo settings'),
+    'file' => 'openai_seo_advisor.admin.inc',
+    'type' => MENU_LOCAL_TASK,
+    'weight' => 0,
+  );
+
+  $items['admin/config/openai/seo/report-types/add'] = array(
+    'title' => 'Add Report Type',
+    'page callback' => 'backdrop_get_form',
+    'page arguments' => array('openai_seo_advisor_report_type_form'),
+    'access arguments' => array('administer openai seo settings'),
+    'file' => 'openai_seo_advisor.admin.inc',
+    'type' => MENU_LOCAL_ACTION,
+  );
+
+  $items['admin/config/openai/seo/report-types/%/edit'] = array(
+    'title' => 'Edit Report Type',
+    'page callback' => 'backdrop_get_form',
+    'page arguments' => array('openai_seo_advisor_report_type_form', 5),
+    'access arguments' => array('administer openai seo settings'),
+    'file' => 'openai_seo_advisor.admin.inc',
+    'type' => MENU_CALLBACK,
+  );
+
+  $items['admin/config/openai/seo/report-types/%/delete'] = array(
+    'title' => 'Delete Report Type',
+    'page callback' => 'backdrop_get_form',
+    'page arguments' => array('openai_seo_advisor_report_type_delete_form', 5),
+    'access arguments' => array('administer openai seo settings'),
+    'file' => 'openai_seo_advisor.admin.inc',
+    'type' => MENU_CALLBACK,
+  );
+
+  $items['node/%node/seo'] = array(
+    'title' => 'SEO Reports',
+    'page callback' => 'openai_seo_advisor_reports_page',
+    'page arguments' => array(1),
+    'access callback' => 'openai_seo_advisor_node_reports_access',
+    'access arguments' => array(1),
+    'file' => 'openai_seo_advisor.pages.inc',
+    'type' => MENU_LOCAL_TASK,
+    'weight' => 10,
+  );
+
+  $items['node/%node/seo/%openai_seo_report/view'] = array(
+    'title' => 'View Report',
+    'page callback' => 'openai_seo_advisor_report_view',
+    'page arguments' => array(1, 3),
+    'access callback' => 'openai_seo_advisor_report_access',
+    'access arguments' => array('view', 3),
+    'file' => 'openai_seo_advisor.pages.inc',
+    'type' => MENU_CALLBACK,
+  );
+
+  $items['node/%node/seo/%openai_seo_report/delete'] = array(
+    'title' => 'Delete Report',
+    'page callback' => 'backdrop_get_form',
+    'page arguments' => array('openai_seo_advisor_report_delete_form', 1, 3),
+    'access callback' => 'openai_seo_advisor_report_access',
+    'access arguments' => array('delete', 3),
+    'file' => 'openai_seo_advisor.pages.inc',
+    'type' => MENU_CALLBACK,
   );
 
   return $items;
 }
 
 /**
- * Returns available text/chat models from the OpenAI module or a fallback.
+ * Loader for SEO reports.
  */
-function openai_seo_advisor_get_model_options() {
-  $options = array();
-
-  // Prefer contrib OpenAI models API if available and API key configured.
-  if (module_exists('openai') && class_exists('OpenAIApi')) {
-    try {
-      $api_key_name = config_get('openai.settings', 'api_key');
-      $api_key = $api_key_name ? key_get_key_value($api_key_name) : '';
-      if (!empty($api_key)) {
-        $api = new OpenAIApi($api_key);
-        if (method_exists($api, 'filterModels')) {
-          $models = $api->filterModels(array('gpt', 'text'));
-          if (is_array($models)) {
-            foreach ($models as $m) {
-              // Filter out image models just in case.
-              if (preg_match('/^gpt-image/i', $m)) { continue; }
-              $options[$m] = $m;
-            }
-          }
-        }
-      }
-      else {
-        watchdog('openai_seo_advisor', 'OpenAI API key not configured; using static model list.', array(), WATCHDOG_NOTICE);
-      }
-    }
-    catch (Exception $e) {
-      watchdog('openai_seo_advisor', 'Failed to fetch OpenAI models: @m', array('@m' => $e->getMessage()), WATCHDOG_WARNING);
-    }
-  }
-
-  // Fallback list if none found.
-  if (empty($options)) {
-    $options = array(
-      'gpt-4o-mini' => 'gpt-4o-mini',
-      'gpt-4o-mini-translate' => 'gpt-4o-mini-translate',
-      'gpt-4o' => 'gpt-4o',
-      'gpt-3.5-turbo' => 'gpt-3.5-turbo',
-      'text-davinci-003' => 'text-davinci-003',
-    );
-  }
-
-  return $options;
+function openai_seo_report_load($report_id) {
+  $reports = entity_load('openai_seo_report', array($report_id));
+  return $reports ? reset($reports) : FALSE;
 }
 
 /**
- * Implements hook_menu_alter(). Ensure our form_alter runs late if needed.
+ * Title callback for report type edit form.
+ */
+function openai_seo_advisor_report_type_title($name) {
+  $config = config('openai_seo_advisor.report_type.' . $name);
+  return $config->get('label');
+}
+
+/**
+ * Access callback for node SEO tab.
+ */
+function openai_seo_advisor_node_reports_access($node) {
+  if (!user_access('view openai seo reports') && !user_access('administer openai seo settings')) {
+    return FALSE;
+  }
+
+  $config = config('openai_seo_advisor.settings');
+  $enabled_bundles = $config->get('enabled_bundles');
+  if (empty($enabled_bundles) || !is_array($enabled_bundles)) {
+    return FALSE;
+  }
+
+  return !empty($enabled_bundles[$node->type]);
+}
+
+
+
+
+/**
+ * Implements hook_menu_alter().
  */
 function openai_seo_advisor_menu_alter(&$items) {
-  // No-op currently; placeholder if we need to adjust weights later.
+  // Nothing to alter currently
 }
 
 /**
- * Implements hook_form_FORM_ID_alter() for system_settings_form.
- * Build settings UI.
+ * Implements hook_theme().
  */
-function openai_seo_advisor_settings_form($form, &$form_state) {
-  // Bundle enablement.
-  $types = node_type_get_types();
-  $options = array();
-  foreach ($types as $type) { $options[$type->type] = check_plain($type->name); }
-
-  $enabled_bundles = config_get('openai_seo_advisor.settings', 'enabled_bundles');
-  $enabled_bundles = is_array($enabled_bundles) ? $enabled_bundles : array();
-
-  // Normalize to array of selected keys for FAPI checkboxes.
-  $default_selected = array();
-  foreach ($enabled_bundles as $bundle_key => $is_enabled) {
-    if (!empty($is_enabled)) { $default_selected[$bundle_key] = $bundle_key; }
-  }
-
-  $form['enabled_bundles'] = array(
-    '#type' => 'checkboxes',
-    '#title' => t('Enable on these content types'),
-    '#options' => $options,
-    '#default_value' => $default_selected,
-    '#description' => t('The SEO Analysis panel will appear on node edit forms for these content types.'),
-    '#element_validate' => array('openai_seo_advisor_enabled_bundles_validate'),
-  );
-
-  // Thresholds and weights fieldsets.
-  $form['thresholds'] = array(
-    '#type' => 'fieldset',
-    '#title' => t('Thresholds'),
-    '#tree' => TRUE,
-  );
-  $form['thresholds']['min_word_count'] = array(
-    '#type' => 'number',
-    '#title' => t('Minimum word count'),
-    '#default_value' => (is_array(config_get('openai_seo_advisor.settings', 'thresholds')) && isset(config_get('openai_seo_advisor.settings', 'thresholds')['min_word_count'])) ? (int) config_get('openai_seo_advisor.settings', 'thresholds')['min_word_count'] : 300,
-    '#min' => 0,
-  );
-  $form['thresholds']['title_min'] = array(
-    '#type' => 'number',
-    '#title' => t('Title minimum characters'),
-    '#default_value' => (is_array(config_get('openai_seo_advisor.settings', 'thresholds')) && isset(config_get('openai_seo_advisor.settings', 'thresholds')['title_min'])) ? (int) config_get('openai_seo_advisor.settings', 'thresholds')['title_min'] : 10,
-    '#min' => 0,
-  );
-  $form['thresholds']['title_max'] = array(
-    '#type' => 'number',
-    '#title' => t('Title maximum characters'),
-    '#default_value' => (is_array(config_get('openai_seo_advisor.settings', 'thresholds')) && isset(config_get('openai_seo_advisor.settings', 'thresholds')['title_max'])) ? (int) config_get('openai_seo_advisor.settings', 'thresholds')['title_max'] : 60,
-    '#min' => 0,
-  );
-  $form['thresholds']['description_min'] = array(
-    '#type' => 'number',
-    '#title' => t('Description minimum characters'),
-    '#default_value' => (is_array(config_get('openai_seo_advisor.settings', 'thresholds')) && isset(config_get('openai_seo_advisor.settings', 'thresholds')['description_min'])) ? (int) config_get('openai_seo_advisor.settings', 'thresholds')['description_min'] : 140,
-    '#min' => 0,
-  );
-  $form['thresholds']['description_max'] = array(
-    '#type' => 'number',
-    '#title' => t('Description maximum characters'),
-    '#default_value' => (is_array(config_get('openai_seo_advisor.settings', 'thresholds')) && isset(config_get('openai_seo_advisor.settings', 'thresholds')['description_max'])) ? (int) config_get('openai_seo_advisor.settings', 'thresholds')['description_max'] : 160,
-    '#min' => 0,
-  );
-
-  // Check toggles.
-  $checks_enabled = config_get('openai_seo_advisor.settings', 'checks_enabled');
-  if (!is_array($checks_enabled)) {
-    $checks_enabled = array(
-      'keyword' => 1,
-      'title_length' => 1,
-      'description_length' => 1,
-      'word_count' => 1,
-      'headings' => 1,
-      'internal_links' => 1,
-      'images_alt' => 1,
-    );
-  }
-  $default_checks = array_keys(array_filter($checks_enabled));
-
-  $form['checks_enabled'] = array(
-    '#type' => 'checkboxes',
-    '#title' => t('Enabled checks'),
-    '#options' => array(
-      'keyword' => t('Focus keyword checks'),
-      'title_length' => t('Title length'),
-      'description_length' => t('Description length'),
-      'word_count' => t('Word count'),
-      'headings' => t('Headings structure'),
-      'internal_links' => t('Internal links'),
-      'images_alt' => t('Images alt text'),
-    ),
-    '#default_value' => $default_checks,
-    '#tree' => TRUE,
-  );
-
-  // Weights allow tuning of scoring per check.
-  $form['weights'] = array(
-    '#type' => 'fieldset',
-    '#title' => t('Weights (scoring per check, total normalized to 100)'),
-    '#tree' => TRUE,
-  );
-  $weights = config_get('openai_seo_advisor.settings', 'weights');
-  $weights = is_array($weights) ? $weights : array();
-  $defaults_w = array(
-    'keyword' => 20,
-    'title_length' => 15,
-    'description_length' => 15,
-    'word_count' => 15,
-    'headings' => 15,
-    'internal_links' => 10,
-    'images_alt' => 10,
-  );
-  foreach ($defaults_w as $k => $def) {
-    $form['weights'][$k] = array(
-      '#type' => 'number',
-      '#title' => t('Weight: @k', array('@k' => strtr($k, array('_' => ' ')))),
-      '#default_value' => isset($weights[$k]) ? (int) $weights[$k] : $def,
-      '#min' => 0,
-      '#max' => 100,
-      '#step' => 1,
-    );
-  }
-
-  // Options.
-  $form['options'] = array(
-    '#type' => 'fieldset',
-    '#title' => t('Analysis options'),
-    '#tree' => TRUE,
-  );
-
-  // AEO (Answer Engine Optimization) toggles.
-  $opts_cfg = is_array(config_get('openai_seo_advisor.settings', 'options')) ? config_get('openai_seo_advisor.settings', 'options') : array();
-  $form['options']['enable_aeo_checks'] = array(
-    '#type' => 'checkbox',
-    '#title' => t('Enable AEO checks'),
-    '#default_value' => !empty($opts_cfg['enable_aeo_checks']) ? 1 : 0,
-    '#description' => t('Run heuristic Answer Engine Optimization checks (featured snippet candidate, question headings, FAQ/HowTo schema, etc.). Off by default.'),
-  );
-  $form['options']['enable_aeo_ai_audit'] = array(
-    '#type' => 'checkbox',
-    '#title' => t('Include AEO deliverables in AI audit (summary + PAA/FAQ)'),
-    '#default_value' => !empty($opts_cfg['enable_aeo_ai_audit']) ? 1 : 0,
-    '#description' => t('When AI audit is enabled, add AEO-specific outputs: a featured-snippet style summary (<=60 words) and up to 5 Q&A pairs.'),
-    '#states' => array(
-      'visible' => array(
-        ':input[name="options[ai_full_audit_mode]"]' => array('checked' => TRUE),
+function openai_seo_advisor_theme($existing, $type, $theme, $path) {
+  return array(
+    'openai_seo_advisor_report' => array(
+      'variables' => array(
+        'report_html' => '',
+        'has_error' => FALSE,
+        'error_message' => '',
       ),
+      'template' => 'openai-seo-advisor-report',
+      'path' => backdrop_get_path('module', 'openai_seo_advisor') . '/templates',
     ),
   );
-
-  // AI is always enabled. Keep model/token/audit settings visible at all times.
-  $form['options']['ai_model'] = array(
-    '#type' => 'select',
-    '#title' => t('AI model'),
-    '#options' => openai_seo_advisor_get_model_options(),
-    '#default_value' => ((is_array(config_get('openai_seo_advisor.settings', 'options')) && isset(config_get('openai_seo_advisor.settings', 'options')['ai_model']) && config_get('openai_seo_advisor.settings', 'options')['ai_model'] !== '') ? config_get('openai_seo_advisor.settings', 'options')['ai_model'] : (config_get('openai.settings', 'default_text_model') ?: 'gpt-4o-mini')),
-    '#description' => t('Select which text model to use for AI suggestions.'),
-    '#attributes' => array('class' => array('openai-seo-model-select')),
-  );
-  $form['options']['ai_max_tokens'] = array(
-    '#type' => 'number',
-    '#title' => t('AI max tokens'),
-    '#default_value' => (int) ((is_array(config_get('openai_seo_advisor.settings', 'options')) && isset(config_get('openai_seo_advisor.settings', 'options')['ai_max_tokens'])) ? config_get('openai_seo_advisor.settings', 'options')['ai_max_tokens'] : 256),
-    '#min' => 64,
-    '#max' => 2048,
-    '#description' => t('Maximum number of tokens the AI may return for suggestions (min 64, max 2048).'),
-  );
-  $form['options']['ai_full_audit_mode'] = array(
-    '#type' => 'checkbox',
-    '#title' => t('Generate Full SEO/AEO Audit'),
-    '#default_value' => !empty((is_array(config_get('openai_seo_advisor.settings', 'options')) && isset(config_get('openai_seo_advisor.settings', 'options')['ai_full_audit_mode']) ? config_get('openai_seo_advisor.settings', 'options')['ai_full_audit_mode'] : 0)) ? 1 : 0,
-    '#description' => t('When enabled, the Analyze button will request a full, formal SEO/AEO audit report in HTML from the AI, based on the rendered preview HTML. Nothing is auto-applied.'),
-  );
-
-  // Developer debug: optionally log sanitized AI input for inspection.
-  $form['options']['log_ai_input'] = array(
-    '#type' => 'checkbox',
-    '#title' => t('Log sanitized AI input (developer only)'),
-    '#default_value' => (is_array(config_get('openai_seo_advisor.settings', 'options')) && !empty(config_get('openai_seo_advisor.settings', 'options')['log_ai_input'])) ? 1 : 0,
-    '#description' => t('When enabled, the module will log a truncated copy of the sanitized preview HTML sent to the AI to the watchdog, and attempt to save the full sanitized HTML to the private files folder for inspection. Use only on development sites.'),
-  );
-
-  $form['#submit'][] = 'openai_seo_advisor_settings_form_submit';
-  // Bind this settings form to Backdrop config so values persist in
-  // openai_seo_advisor.settings instead of legacy variables.
-  $form['#config'] = 'openai_seo_advisor.settings';
-  return system_settings_form($form);
 }
 
 /**
- * Element validator for enabled_bundles checkboxes.
- */
-function openai_seo_advisor_enabled_bundles_validate(&$element, &$form_state, $form) {
-  $values = isset($form_state['values']['enabled_bundles']) ? $form_state['values']['enabled_bundles'] : array();
-  $normalized = array();
-  foreach ($values as $bundle => $val) {
-    $normalized[$bundle] = !empty($val) ? 1 : 0;
-  }
-  $form_state['values']['enabled_bundles'] = $normalized;
-}
-
-/**
- * Settings submit: normalize nested arrays and clamp ranges.
- */
-function openai_seo_advisor_settings_form_submit($form, &$form_state) {
-  // Normalize checks_enabled to 1/0 map.
-  if (isset($form_state['values']['checks_enabled'])) {
-    $normalized = array();
-    foreach ($form_state['values']['checks_enabled'] as $k => $v) {
-      $normalized[$k] = !empty($v) ? 1 : 0;
-    }
-    $form_state['values']['checks_enabled'] = $normalized;
-  }
-
-  // Ensure options exist and set defaults.
-  if (empty($form_state['values']['options']) || !is_array($form_state['values']['options'])) {
-    $form_state['values']['options'] = array();
-  }
-  $opts = &$form_state['values']['options'];
-  $opts += array(
-    'ai_model' => (string) (config_get('openai.settings', 'default_text_model') ?: 'gpt-4o-mini'),
-    'ai_max_tokens' => 256,
-  );
-  $opts['ai_full_audit_mode'] = !empty($opts['ai_full_audit_mode']) ? 1 : 0;
-  $opts['ai_model'] = isset($opts['ai_model']) && is_string($opts['ai_model']) && trim($opts['ai_model']) !== '' ? trim($opts['ai_model']) : (config_get('openai.settings', 'default_text_model') ?: 'gpt-4o-mini');
-  $opts['ai_max_tokens'] = (int) $opts['ai_max_tokens'];
-  if ($opts['ai_max_tokens'] < 64) { $opts['ai_max_tokens'] = 64; }
-  if ($opts['ai_max_tokens'] > 2048) { $opts['ai_max_tokens'] = 2048; }
-}
-
-/**
- * Implements hook_form_alter(). Add the analyzer to node edit forms.
+ * Implements hook_form_alter().
  */
 function openai_seo_advisor_form_alter(&$form, &$form_state, $form_id) {
-  // Detect node edit forms.
-  if (!(isset($form['#entity_type']) && $form['#entity_type'] === 'node') && strpos($form_id, 'node_') !== 0) {
-    return;
-  }
-
-  // Bundle detection.
-  $bundle = !empty($form['#bundle']) ? $form['#bundle'] : (!empty($form['#node_type']) ? $form['#node_type'] : (!empty($form['#entity']) && isset($form['#entity']->type) ? $form['#entity']->type : NULL));
-  if (empty($bundle)) { return; }
-
-  // Check enablement.
-  $enabled_bundles = config_get('openai_seo_advisor.settings', 'enabled_bundles');
-  $enabled = !empty($enabled_bundles[$bundle]);
-  if (!$enabled) { return; }
-
-  // Permissions.
-  if (!(user_access('analyze content seo with openai') || user_access('administer openai seo settings') || user_access('administer site configuration'))) {
-    return;
-  }
-
-  // Build panel.
-  $wrapper_id = 'openai-seo-advisor-results';
-  $form['openai_seo_advisor'] = array(
-    '#type' => 'fieldset',
-    '#title' => t('SEO Analysis'),
-    '#weight' => 90,
-  );
-  $form['openai_seo_advisor']['focus_keyword'] = array(
-    '#type' => 'textfield',
-    '#title' => t('Focus keyword (optional)'),
-    '#size' => 40,
-    '#maxlength' => 128,
-    '#description' => t('Enter a primary focus keyword (single keyword).'),
-  );
-
-  $form['openai_seo_advisor']['analyze'] = array(
-    '#type' => 'submit',
-    '#value' => t('Analyze SEO'),
-    '#submit' => array('openai_seo_advisor_analyze_submit'),
-    '#ajax' => array(
-      'callback' => 'openai_seo_advisor_analyze_ajax',
-      'wrapper' => $wrapper_id,
-      'method' => 'replace',
-      'effect' => 'fade',
-      'progress' => array('type' => 'throbber', 'message' => t('Analyzing…')),
-    ),
-    '#weight' => -5,
-  );
-
-  $form['openai_seo_advisor']['results'] = array(
-    '#type' => 'container',
-    '#attributes' => array('id' => $wrapper_id),
-  );
-
-  // If we have a previous analysis result stored in form_state (from AJAX
-  // submit), render it into the results container on rebuild so the
-  // callback replaces the wrapper with actual content.
-  if (isset($form_state['openai_seo_advisor']['last_result']) && is_array($form_state['openai_seo_advisor']['last_result'])) {
-    $form['openai_seo_advisor']['results'] = openai_seo_advisor_render_results($form_state['openai_seo_advisor']['last_result']);
-    // Preserve wrapper ID on the rendered array.
-    if (is_array($form['openai_seo_advisor']['results'])) {
-      $form['openai_seo_advisor']['results']['#prefix'] = '<div id="' . check_plain($wrapper_id) . '">';
-      $form['openai_seo_advisor']['results']['#suffix'] = '</div>';
-    }
-  }
+  // Currently only using analyze form on dedicated SEO tab
 }
 
 /**
- * AJAX callback to render results container.
+ * Get all available report types.
  */
-function openai_seo_advisor_analyze_ajax($form, &$form_state) {
-  return isset($form['openai_seo_advisor']['results']) ? $form['openai_seo_advisor']['results'] : $form;
-}
+function openai_seo_advisor_get_report_types() {
+  $types = array();
+  $configs = config_get_names_with_prefix('openai_seo_advisor.report_type.');
 
-
-/**
- * Submit handler for Analyze button.
- */
-function openai_seo_advisor_analyze_submit($form, &$form_state) {
-  $form_state['rebuild'] = TRUE;
-
-  // Options simplified: always require core preview in 'full' view mode and always include AI suggestions.
-  $opts = config_get('openai_seo_advisor.settings', 'options');
-  $opts = is_array($opts) ? $opts : array();
-  $use_preview = TRUE;
-  $enable_ai = TRUE;
-  $ai_model = !empty($opts['ai_model']) ? $opts['ai_model'] : (config_get('openai.settings', 'default_text_model') ?: 'gpt-4o-mini');
-  $ai_max_tokens = !empty($opts['ai_max_tokens']) ? (int) $opts['ai_max_tokens'] : 256;
-
-  // Build preview HTML (or empty if not possible).
-  $html = openai_seo_advisor_build_preview_html($form, $form_state);
-
-  // Strip the preview warning message from HTML
-  if ($html !== '') {
-    $html = preg_replace(
-      '#<div\s+class="messages\s+warning"[^>]*>.*?</div>\s*#is',
-      '',
-      $html
+  foreach ($configs as $config_name) {
+    $config = config($config_name);
+    $name = str_replace('openai_seo_advisor.report_type.', '', $config_name);
+    $types[$name] = array(
+      'name' => $name,
+      'label' => $config->get('label'),
+      'description' => $config->get('description'),
+      'prompt' => $config->get('prompt'),
+      'status' => $config->get('status'),
+      'weight' => $config->get('weight'),
     );
   }
 
-  $used_preview = ($html !== '');
-
-  // Note: removed call to openai_seo_advisor_remove_preview_warning_messages().
-  // We only needed the CSS override with !important to reliably hide the
-  // preview warning inside the results wrapper. Do not manipulate global
-  // messages here — that broke the report return flow.
-
-  // If preview is required but unavailable, show error and stop.
-  if (!empty($use_preview) && !$used_preview) {
-    $view_mode = 'full';
-    $result = array(
-      'error' => t('Preview could not be rendered. Ensure this content type has a view mode (@mode) with visible title/body.', array('@mode' => $view_mode)),
-      'source' => array('used_preview' => FALSE, 'view_mode' => $view_mode),
-    );
-    $form_state['openai_seo_advisor']['last_result'] = $result;
-    $form['openai_seo_advisor']['results'] = openai_seo_advisor_render_results($result);
-    return;
-  }
-
-  // Fallback plain text collection from form values (only used when preview is not required).
-  $raw_text = openai_seo_advisor_collect_text_from_values(isset($form_state['values']) ? $form_state['values'] : array(), 8000);
-
-  // Title determination from form or entity.
-  $title = '';
-  if (isset($form_state['values']['title'])) { $title = is_array($form_state['values']['title']) && isset($form_state['values']['title'][0]['value']) ? $form_state['values']['title'][0]['value'] : $form_state['values']['title']; }
-  elseif (isset($form['title']['#value'])) { $title = $form['title']['#value']; }
-  elseif (isset($form['title']['#default_value'])) { $title = $form['title']['#default_value']; }
-  elseif (!empty($form['#entity']) && isset($form['#entity']->title)) { $title = $form['#entity']->title; }
-  $title = trim((string) $title);
-
-  // Prefer preview HTML as analysis source when available.
-  $text = $used_preview ? $html : $raw_text;
-
-  // Extract meta description from Metatag form if present.
-  $meta_description = '';
-  if (!empty($form['metatags']) && is_array($form['metatags'])) {
-    $langcode = !empty($form['metatags']['#language']) ? $form['metatags']['#language'] : LANGUAGE_NONE;
-    if (!empty($form['metatags'][$langcode]) && is_array($form['metatags'][$langcode])) {
-      $desc = openai_seo_advisor_find_metatag_value($form['metatags'][$langcode], 'description');
-      if (is_string($desc)) { $meta_description = $desc; }
+  uasort($types, function($a, $b) {
+    if ($a['weight'] == $b['weight']) {
+      return strcmp($a['label'], $b['label']);
     }
-  }
+    return $a['weight'] < $b['weight'] ? -1 : 1;
+  });
 
-  // Focus keyword (optional): do not infer if not provided.
-  $focus = '';
-  if (!empty($form_state['values']['focus_keyword'])) { $focus = trim((string) $form_state['values']['focus_keyword']); }
-
-  // Run rules analysis.
-  $result = openai_seo_advisor_analyze($title, $text, $meta_description, $focus);
-  $result['source'] = isset($result['source']) && is_array($result['source']) ? $result['source'] : array();
-  $result['source'] = array_merge($result['source'], array(
-    'used_preview' => (bool) $used_preview,
-    'view_mode' => 'full',
-  ));
-  // Indicate if we used Backdrop core Preview HTML (same as clicking Preview).
-  if (isset($form_state['openai_seo_advisor']['_core_preview_used'])) {
-    $result['source']['core_preview'] = (bool) $form_state['openai_seo_advisor']['_core_preview_used'];
-  }
-
-  // Optional AI suggestions or full audit.
-  if ($enable_ai) {
-    $opts_local = config_get('openai_seo_advisor.settings', 'options');
-    $full_audit = !empty($opts_local['ai_full_audit_mode']);
-    if ($full_audit) {
-      // Use preview HTML when available, otherwise raw text.
-      $audit_input = $used_preview ? $text : $raw_text;
-      $audit_md = openai_seo_advisor_generate_ai_audit($title, $audit_input, $meta_description, $focus, $ai_model, $ai_max_tokens);
-      if (is_string($audit_md) && $audit_md !== '') { $result['ai_markdown_audit'] = $audit_md; }
-    }
-    else {
-      // Use sanitized preview HTML for AI suggestions when available.
-      $ai_source_html = $used_preview ? $text : $raw_text;
-      $ai = openai_seo_advisor_generate_ai_suggestions($title, $ai_source_html, $raw_text, $meta_description, $focus, $ai_model, $ai_max_tokens);
-      if (is_array($ai)) { $result['ai'] = $ai; }
-    }
-  }
-
-  // Log sanitized AI input if enabled.
-  if (!empty($opts['log_ai_input'])) {
-    $truncated_html = backdrop_strlen($html) > 8000 ? backdrop_substr($html, 0, 8000) . '…' : $html;
-    watchdog('openai_seo_advisor', 'Sanitized AI input HTML (truncated for log): @html', array('@html' => $truncated_html), WATCHDOG_DEBUG);
-    // Attempt to save full HTML to private files directory for inspection.
-    if (function_exists('file_save_data') && user_access('administer site configuration')) {
-      $file = file_save_data($html, 'public://openai_seo_advisor_ai_input_' . date('YmdHis') . '.html', FILE_EXISTS_REPLACE);
-      if ($file) {
-        watchdog('openai_seo_advisor', 'Full sanitized AI input HTML saved to: @file', array('@file' => $file->uri), WATCHDOG_NOTICE);
-      }
-      else {
-        watchdog('openai_seo_advisor', 'Failed to save full sanitized AI input HTML to file.', array(), WATCHDOG_WARNING);
-      }
-    }
-  }
-
-  $form_state['openai_seo_advisor']['last_result'] = $result;
-  $form['openai_seo_advisor']['results'] = openai_seo_advisor_render_results($result);
+  return $types;
 }
 
 /**
- * Render results block.
+ * Check if a report type exists.
  */
-function openai_seo_advisor_render_results(array $result) {
-  $build = array();
-
-  if (!empty($result['error'])) {
-    $build['error'] = array('#type' => 'markup', '#markup' => '<div class="messages error">' . check_plain($result['error']) . '</div>');
-    return $build;
-  }
-
-  // Summary.
-  $status = strtoupper(isset($result['status']) ? $result['status'] : '');
-  $build['summary'] = array(
-    '#type' => 'markup',
-    '#markup' => '<div class="openai-seo-summary"><strong>' . t('SEO Score: @score (@status)', array('@score' => (int) $result['score'], '@status' => $status)) . '</strong></div>',
-  );
-
-
-  if (!empty($result['source']['guessed_focus'])) {
-    $gf = $result['source']['guessed_focus'];
-    $build['guessed_focus_note'] = array(
-      '#type' => 'markup',
-      '#markup' => '<div class="openai-seo-focus-note"><em>' . check_plain(t('No focus keyword entered; using inferred focus: "@k".', array('@k' => $gf))) . '</em></div>',
-    );
-  }
-
-  // Checklist.
-  if (!empty($result['checks']) && is_array($result['checks'])) {
-    $items = array();
-    foreach ($result['checks'] as $key => $info) {
-      $icon = !empty($info['pass']) ? '✔' : '✖';
-      $items[] = $icon . ' ' . check_plain($info['message']);
-    }
-    $build['checklist'] = array('#theme' => 'item_list', '#items' => $items);
-  }
-
-  // AEO section.
-  if (!empty($result['aeo']) && is_array($result['aeo'])) {
-    $build['aeo_header'] = array('#type' => 'markup', '#markup' => '<h4>' . t('AEO (Answer Engine Optimization)') . '</h4>');
-    $aeo_items = array();
-    if (!empty($result['aeo']['items']) && is_array($result['aeo']['items'])) {
-      foreach ($result['aeo']['items'] as $it) {
-        $icon = !empty($it['pass']) ? '✔' : (!empty($it['level']) && $it['level'] === 'fail' ? '✖' : '•');
-        $aeo_items[] = $icon . ' ' . check_plain($it['message']);
-      }
-    }
-    if (!empty($aeo_items)) {
-      $build['aeo_list'] = array('#theme' => 'item_list', '#items' => $aeo_items);
-    }
-    if (!empty($result['aeo']['featured_snippet_candidate'])) {
-      $fs = check_plain($result['aeo']['featured_snippet_candidate']);
-      if ($fs !== '') {
-        $build['aeo_fs'] = array('#type' => 'markup', '#markup' => '<div class="openai-aeo-fs"><strong>' . t('Featured snippet candidate:') . '</strong> ' . $fs . '</div>');
-      }
-    }
-  }
-
-  // Recommendations.
-  $recs = openai_seo_advisor_build_recommendations($result);
-  if (!empty($recs)) {
-    $build['recommendations_header'] = array('#type' => 'markup', '#markup' => '<h4>' . t('Recommendations') . '</h4>');
-    $build['recommendations'] = array('#theme' => 'item_list', '#items' => $recs);
-  }
-
-  // Full SEO/AEO Audit (HTML output) displayed as a collapsible accordion (closed by default).
-  if (!empty($result['ai_markdown_audit']) && is_string($result['ai_markdown_audit'])) {
-    // Treat returned content as HTML and sanitize it.
-    $allowed = array('h2', 'h3', 'h4', 'p', 'ul', 'ol', 'li', 'a', 'strong', 'em', 'code', 'pre', 'blockquote', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'br');
-    $audit_html = filter_xss($result['ai_markdown_audit'], $allowed);
-
-    // Use a collapsible fieldset so the full report is hidden until expanded.
-    $build['ai_audit'] = array(
-      '#type' => 'fieldset',
-      '#title' => t('Full SEO/AEO Audit'),
-      '#collapsible' => TRUE,
-      '#collapsed' => TRUE,
-      '#attributes' => array('class' => array('openai-seo-ai-audit-fieldset')),
-      'content' => array(
-        '#type' => 'markup',
-        '#markup' => '<div class="openai-seo-ai-audit html">' . $audit_html . '</div>',
-      ),
-    );
-  }
-
-  // AI suggestions.
-  if (!empty($result['ai']) && is_array($result['ai'])) {
-    $ai = $result['ai'];
-    $build['ai_header'] = array('#type' => 'markup', '#markup' => '<h4>' . t('AI suggestions') . '</h4>');
-
-    // SERP preview using first title/description idea.
-    $serp_title = !empty($ai['title_ideas'][0]) ? $ai['title_ideas'][0] : (!empty($result['focus']) ? $result['focus'] : '');
-    $serp_desc = !empty($ai['description_ideas'][0]) ? $ai['description_ideas'][0] : '';
-    $serp = '<div class="openai-seo-serp"><div class="openai-serp-title">' . check_plain($serp_title) . '</div>' . '<div class="openai-serp-desc">' . check_plain($serp_desc) . '</div></div>';
-    $build['serp_preview'] = array('#type' => 'markup', '#markup' => $serp);
-
-    if (!empty($ai['tips']) && is_array($ai['tips'])) {
-      $tips_items = array();
-      foreach ($ai['tips'] as $tip) { $tips_items[] = check_plain($tip); }
-      if (!empty($tips_items)) { $build['ai_tips'] = array('#theme' => 'item_list', '#items' => $tips_items); }
-    }
-
-    if (!empty($ai['title_ideas']) && is_array($ai['title_ideas'])) {
-      $titles_items = array();
-      foreach ($ai['title_ideas'] as $ti) {
-        $clean = trim(preg_replace('/\s+/', ' ', preg_replace('/https?:\/\/\S+/i', '', $ti)));
-        if ($clean === '') { continue; }
-        $titles_items[] = check_plain($clean);
-      }
-      if (!empty($titles_items)) {
-        $build['ai_titles'] = array(
-          '#theme' => 'item_list',
-          '#title' => t('Title ideas'),
-          '#items' => $titles_items,
-        );
-      }
-    }
-
-    if (!empty($ai['description_ideas']) && is_array($ai['description_ideas'])) {
-      $desc_items = array();
-      foreach ($ai['description_ideas'] as $di) {
-        $clean_desc = trim(preg_replace('/\s+/', ' ', preg_replace('/https?:\/\/\S+/i', '', $di)));
-        if ($clean_desc === '') { continue; }
-        $desc_items[] = check_plain($clean_desc);
-      }
-      if (!empty($desc_items)) {
-        $build['ai_descs'] = array(
-          '#theme' => 'item_list',
-          '#title' => t('Meta description ideas'),
-          '#items' => $desc_items,
-        );
-      }
-    }
-
-    if (!empty($ai['keywords']) && is_array($ai['keywords'])) {
-      $kw = array(); foreach ($ai['keywords'] as $k) { $kw[] = check_plain($k); }
-      if (!empty($kw)) { $build['ai_keywords'] = array('#type' => 'markup', '#markup' => '<div><strong>' . t('Keyword ideas:') . '</strong> ' . implode(', ', $kw) . '</div>'); }
-    }
-  }
-
-  return $build;
+function openai_seo_advisor_report_type_exists($name) {
+  $config = config('openai_seo_advisor.report_type.' . $name);
+  return !$config->isNew();
 }
 
 /**
- * AJAX callback for Apply buttons.
- */
-function openai_seo_advisor_apply_ajax($form, &$form_state) {
-  if (!(user_access('analyze content seo with openai') || user_access('administer openai seo settings') || user_access('administer site configuration'))) {
-    return $form['openai_seo_advisor']['results'];
-  }
-  $trigger = isset($form_state['triggering_element']) ? $form_state['triggering_element'] : NULL;
-  if (empty($trigger)) { return $form['openai_seo_advisor']['results']; }
-  $type = isset($trigger['#ai_apply_type']) ? $trigger['#ai_apply_type'] : NULL;
-  $value = isset($trigger['#ai_apply_value']) ? $trigger['#ai_apply_value'] : (isset($trigger['#value']) ? $trigger['#value'] : '');
-  $value = trim((string) $value);
-
-  if ($type === 'title') {
-    if (isset($form['title']) && is_array($form['title'])) {
-      form_set_value($form['title'], $value, $form_state);
-    }
-    else {
-      $form_state['input']['title'] = $value;
-      $form_state['values']['title'] = $value;
-    }
-    $form_state['rebuild'] = TRUE;
-  }
-  elseif ($type === 'description' && !empty($form['metatags']) && is_array($form['metatags'])) {
-    $lang = !empty($form['metatags']['#language']) ? $form['metatags']['#language'] : LANGUAGE_NONE;
-    if (!empty($form['metatags'][$lang]) && is_array($form['metatags'][$lang])) {
-      $ref = &openai_seo_advisor_find_value_element_ref($form['metatags'][$lang], 'description');
-      if (isset($ref) && is_array($ref)) {
-        form_set_value($ref, $value, $form_state);
-      }
-      else {
-        if (!isset($form_state['input'])) { $form_state['input'] = array(); }
-        if (!isset($form_state['input']['metatags'])) { $form_state['input']['metatags'] = array(); }
-        if (!isset($form_state['input']['metatags'][$lang])) { $form_state['input']['metatags'][$lang] = array(); }
-        $form_state['input']['metatags'][$lang]['description'] = array('value' => $value);
-        if (!isset($form_state['values']['metatags'])) { $form_state['values']['metatags'] = array(); }
-        if (!isset($form_state['values']['metatags'][$lang])) { $form_state['values']['metatags'][$lang] = array(); }
-        $form_state['values']['metatags'][$lang]['description'] = array('value' => $value);
-      }
-    }
-    $form_state['rebuild'] = TRUE;
-  }
-
-  return isset($form['openai_seo_advisor']['results']) ? $form['openai_seo_advisor']['results'] : $form;
-}
-
-/**
- * Find element reference for a metatag value inside a container.
- */
-function &openai_seo_advisor_find_value_element_ref(&$container, $tag_key) {
-  $null = NULL;
-  if (!is_array($container)) { return $null; }
-  if (isset($container[$tag_key]) && is_array($container[$tag_key]) && isset($container[$tag_key]['value'])) { return $container[$tag_key]['value']; }
-  foreach ($container as $k => &$v) {
-    if (is_string($k) && $k !== '' && $k[0] === '#') { continue; }
-    if (is_array($v)) {
-      if ($k === $tag_key && isset($v['value'])) { return $v['value']; }
-      $found = &openai_seo_advisor_find_value_element_ref($v, $tag_key);
-      if (isset($found)) { return $found; }
-    }
-  }
-  return $null;
-}
-
-/**
- * Find a metatag's string value from a form container if present.
- */
-function openai_seo_advisor_find_metatag_value($container, $tag_key) {
-  if (!is_array($container)) { return ''; }
-  if (isset($container[$tag_key])) {
-    $val_el = $container[$tag_key];
-    if (isset($val_el['#value']) && is_string($val_el['#value'])) { return $val_el['#value']; }
-    if (isset($val_el['#default_value']) && is_string($val_el['#default_value'])) { return $val_el['#default_value']; }
-    if (isset($val_el['value']) && is_string($val_el['value'])) { return $val_el['value']; }
-    if (isset($val_el['value']['#value']) && is_string($val_el['value']['#value'])) { return $val_el['value']['#value']; }
-  }
-  foreach ($container as $k => $v) {
-    if (is_string($k) && $k !== '' && $k[0] === '#') { continue; }
-    if (is_array($v)) {
-      $found = openai_seo_advisor_find_metatag_value($v, $tag_key);
-      if ($found !== '') { return $found; }
-    }
-  }
-  return '';
-}
-
-/**
- * Build preview HTML by cloning the node entity and rendering view mode.
- */
-function openai_seo_advisor_build_preview_html($form, &$form_state) {
-  $html_from_view = '';
-  try {
-    $node_for_preview = NULL;
-    if (function_exists('node_form_submit_build_node')) {
-      $node_for_preview = node_form_submit_build_node($form, $form_state);
-    }
-    elseif (!empty($form['#entity']) && is_object($form['#entity'])) {
-      $node_for_preview = clone $form['#entity'];
-      $title = '';
-      if (isset($form_state['values']['title'])) {
-        $title = is_array($form_state['values']['title']) && isset($form_state['values']['title'][0]['value']) ? $form_state['values']['title'][0]['value'] : $form_state['values']['title'];
-      }
-      if ($title !== '') { $node_for_preview->title = $title; }
-    }
-
-    if ($node_for_preview && !empty($node_for_preview->type) && function_exists('node_view') && function_exists('backdrop_render')) {
-      // Don't set in_preview flag so the preview message won't be added
-      $node_for_preview->in_preview = FALSE;
-
-      $build = node_view($node_for_preview, 'full');
-      if (is_array($build) && !empty($build)) {
-        $rendered = trim((string) backdrop_render($build));
-        if ($rendered !== '') {
-          $html_from_view = $rendered;
-        }
-      }
-    }
-  }
-  catch (Exception $e) {
-    // Swallow and return empty string below.
-  }
-
-  return $html_from_view;
-}
-
-/**
- * Convert mixed value to plain text for heuristics.
- */
-function openai_seo_advisor_to_plain($mixed) {
-  if (is_string($mixed)) { return trim(strip_tags(decode_entities($mixed))); }
-  if (is_array($mixed)) { $out = ''; foreach ($mixed as $v) { $out .= ' ' . openai_seo_advisor_to_plain($v); } return trim(preg_replace('/\s+/', ' ', $out)); }
-  if (is_object($mixed)) { return openai_seo_advisor_to_plain((array) $mixed); }
-  return '';
-}
-
-/**
- * Collect text from form_state values to a length limit.
- */
-function openai_seo_advisor_collect_text_from_values($values, $limit = 8000) {
-  $out = '';
-  $stack = array($values);
-  $seen = 0;
-  while (!empty($stack) && $seen < 500) {
-    $cur = array_pop($stack); $seen++;
-    if (is_string($cur)) { $chunk = openai_seo_advisor_to_plain($cur); if ($chunk !== '') { $out .= ($out === '' ? '' : ' ') . $chunk; } continue; }
-    if (is_object($cur)) { $cur = (array) $cur; }
-    if (!is_array($cur)) { continue; }
-    foreach ($cur as $v) {
-      if (is_array($v)) {
-        if (isset($v['value']) && is_string($v['value'])) { $stack[] = $v['value']; continue; }
-        if (isset($v['safe_value']) && is_string($v['safe_value'])) { $stack[] = $v['safe_value']; continue; }
-        if (isset($v['summary']) && is_string($v['summary'])) { $stack[] = $v['summary']; continue; }
-        if (isset($v[LANGUAGE_NONE]) && is_array($v[LANGUAGE_NONE])) { $stack[] = $v[LANGUAGE_NONE]; continue; }
-        if (isset($v['entity'])) { $stack[] = $v['entity']; continue; }
-      }
-      $stack[] = $v;
-    }
-    if (backdrop_strlen($out) > $limit) { $out = backdrop_substr($out, 0, $limit) . '…'; break; }
-  }
-  return trim(preg_replace('/\s+/', ' ', $out));
-}
-
-/**
- * Analyze content and compute score.
- */
-function openai_seo_advisor_analyze($title, $html_or_text, $meta_description, $focus_keyword) {
-  $th = config_get('openai_seo_advisor.settings', 'thresholds'); $th = is_array($th) ? $th : array();
-  $ck = config_get('openai_seo_advisor.settings', 'checks_enabled'); $ck = is_array($ck) ? array_filter($ck) : array();
-  $weights = config_get('openai_seo_advisor.settings', 'weights'); $weights = is_array($weights) ? $weights : array();
-
-  $checks = array(); $score = 0; $total_weight = 0;
-  $add_check = function($key, $pass, $message) use (&$checks, &$weights, &$score, &$total_weight) {
-    $w = isset($weights[$key]) ? (int) $weights[$key] : 0;
-    $checks[$key] = array('pass' => (bool) $pass, 'message' => $message, 'weight' => $w);
-    $total_weight += $w; if ($pass) { $score += $w; }
-  };
-
-  $title = trim((string) $title);
-  $desc = trim((string) $meta_description);
-  $text_plain = openai_seo_advisor_to_plain($html_or_text);
-
-  // Title length.
-  if (!empty($ck['title_length'])) {
-    $len = backdrop_strlen($title);
-    $min = isset($th['title_min']) ? (int) $th['title_min'] : 10;
-    $max = isset($th['title_max']) ? (int) $th['title_max'] : 60;
-    $pass = ($len >= $min && $len <= $max);
-    $add_check('title_length', $pass, t('Title length: @len chars (recommended @min–@max).', array('@len' => $len, '@min' => $min, '@max' => $max)));
-  }
-
-  // Meta description.
-  if (!empty($ck['description_length'])) {
-    $dmin = isset($th['description_min']) ? (int) $th['description_min'] : 140;
-    $dmax = isset($th['description_max']) ? (int) $th['description_max'] : 160;
-    $dlen = backdrop_strlen($desc);
-    $pass = ($dlen >= $dmin && $dlen <= $dmax);
-    $add_check('description_length', $pass, t('Meta description length: @len chars (recommended @min–@max).', array('@len' => $dlen, '@min' => $dmin, '@max' => $dmax)));
-  }
-
-  // Word count.
-  if (!empty($ck['word_count'])) {
-    $words = preg_split('/\s+/u', $text_plain, -1, PREG_SPLIT_NO_EMPTY);
-    $count = is_array($words) ? count($words) : 0;
-    $min_wc = isset($th['min_word_count']) ? (int) $th['min_word_count'] : 300;
-    $pass = $count >= $min_wc;
-    $add_check('word_count', $pass, t('Word count: @count (minimum @min).', array('@count' => $count, '@min' => $min_wc)));
-  }
-
-  // Headings (H1/H2) counts based on HTML.
-  if (!empty($ck['headings'])) {
-    $text = $html_or_text; // allow regex on HTML.
-    $h1s = preg_match_all('/<h1\b[^>]*>(.*?)<\/h1>/i', $text, $m1);
-    $h2s = preg_match_all('/<h2\b[^>]*>(.*?)<\/h2>/i', $text, $m2);
-    $pass = ($h1s === 1 && $h2s >= 1);
-    $add_check('headings', $pass, t('Headings: @h1 H1 and @h2 H2 found (recommend exactly one H1 and at least one H2).', array('@h1' => (int) $h1s, '@h2' => (int) $h2s)));
-  }
-
-  // Internal links (count anchors that are relative OR absolute to this host).
-  if (!empty($ck['internal_links'])) {
-    $html = (string) $html_or_text;
-    $internal = 0;
-
-    // Determine base host of the current site.
-    $base_host = '';
-    if (!empty($GLOBALS['base_url'])) {
-      $base_host = parse_url($GLOBALS['base_url'], PHP_URL_HOST);
-    }
-
-    $counted = FALSE;
-
-    if (class_exists('DOMDocument')) {
-      $dom = new DOMDocument('1.0', 'UTF-8');
-      libxml_use_internal_errors(TRUE);
-      $htmlUtf8 = mb_convert_encoding($html, 'HTML-ENTITIES', 'UTF-8');
-      $loaded = $dom->loadHTML(
-        '<!DOCTYPE html><html lang="en"><body>' . $htmlUtf8 . '</body></html>',
-        LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD
-      );
-      libxml_clear_errors();
-
-      if ($loaded) {
-        foreach ($dom->getElementsByTagName('a') as $a) {
-          $href = trim($a->getAttribute('href'));
-          if ($href === '') { continue; }
-
-          // Ignore mailto:, tel:, javascript:, etc.
-          if (preg_match('#^[a-z]+:#i', $href) && !preg_match('#^https?://#i', $href)) {
-            continue;
-          }
-
-          if (preg_match('#^https?://#i', $href)) {
-            // Absolute URL: count if host matches site host.
-            if ($base_host) {
-              $h = parse_url($href, PHP_URL_HOST);
-              if ($h !== NULL && strcasecmp($h, $base_host) === 0) {
-                $internal++;
-              }
-            }
-          } else {
-            // Relative URL (starts with /, ?, or a relative path): count as internal.
-            $internal++;
-          }
-        }
-        $counted = TRUE;
-      }
-    }
-
-    // Regex fallback if DOM fails.
-    if (!$counted) {
-      if (preg_match_all('/<a\b[^>]*href\s*=\s*"([^"]+)"/i', $html, $m)) {
-        foreach ($m[1] as $href) {
-          $href = trim($href);
-          if ($href === '') { continue; }
-          if (preg_match('#^[a-z]+:#i', $href) && !preg_match('#^https?://#i', $href)) {
-            continue;
-          }
-          if (preg_match('#^https?://#i', $href)) {
-            if ($base_host) {
-              $h = parse_url($href, PHP_URL_HOST);
-              if ($h !== NULL && strcasecmp($h, $base_host) === 0) {
-                $internal++;
-              }
-            }
-          } else {
-            $internal++;
-          }
-        }
-      }
-    }
-
-    $pass = ($internal >= 1);
-    $add_check('internal_links', $pass, t('Internal links: @n found (at least 1 recommended).', array('@n' => (int) $internal)));
-  }
-
-  // Image alt attributes (preview HTML parsing).
-  if (!empty($ck['images_alt'])) {
-    $html = (string) $html_or_text;
-    $img_count_dom = 0;
-    $missing_alt_dom = 0;
-
-    // DOM parse first.
-    if (class_exists('DOMDocument')) {
-      $dom = new DOMDocument('1.0', 'UTF-8');
-      libxml_use_internal_errors(TRUE);
-      $htmlUtf8 = mb_convert_encoding($html, 'HTML-ENTITIES', 'UTF-8');
-      $loaded = $dom->loadHTML('<!DOCTYPE html><html lang="en"><body>' . $htmlUtf8 . '</body></html>', LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
-      libxml_clear_errors();
-      if ($loaded) {
-        $imgs = $dom->getElementsByTagName('img');
-        $img_count_dom = $imgs->length;
-        foreach ($imgs as $img) {
-          $alt = $img->getAttribute('alt');
-          if ($alt === NULL || trim($alt) === '') { $missing_alt_dom++; }
-        }
-      }
-    }
-
-    // Regex parsing (always run; used to augment DOM in case DOM misses some tags in certain fragments).
-    $img_count_rx = 0;
-    $missing_alt_rx = 0;
-    if (preg_match_all('/<img\b[^>]*>/i', $html, $m)) {
-      $img_count_rx = count($m[0]);
-      foreach ($m[0] as $tag) {
-        if (!preg_match('/\balt\s*=\s*("[^"]*"|\'[^\']*\')/i', $tag)) {
-          $missing_alt_rx++;
-        }
-        else {
-          // Treat alt="" or alt='   ' as missing too.
-          if (preg_match('/\balt\s*=\s*"\s*"|\balt\s*=\s*\'\s*\'/i', $tag)) {
-            $missing_alt_rx++;
-          }
-        }
-      }
-    }
-
-    // Prefer the richer count: if regex finds more <img> than DOM, use regex stats; otherwise use DOM.
-    $use_regex = ($img_count_rx > $img_count_dom);
-    $img_count = $use_regex ? $img_count_rx : $img_count_dom;
-    $missing_alt = $use_regex ? $missing_alt_rx : $missing_alt_dom;
-
-    if ($img_count > 0) {
-      $pass = ($missing_alt === 0);
-      $msg = $pass
-        ? t('Images: @n found; all have alt text.', array('@n' => $img_count))
-        : t('Images: @n found; @m missing alt text.', array('@n' => $img_count, '@m' => $missing_alt));
-      $add_check('images_alt', $pass, $msg);
-    }
-    else {
-      $add_check('images_alt', TRUE, t('No images found in preview HTML (alt text not required).'));
-    }
-  }
-
-  // Focus keyword checks.
-  if (!empty($ck['keyword'])) {
-    $focus = trim(mb_strtolower($focus_keyword));
-    if ($focus !== '') {
-      $in_title = (mb_stripos(mb_strtolower($title), $focus) !== FALSE);
-      $first_words = implode(' ', array_slice(preg_split('/\s+/u', $text_plain, -1, PREG_SPLIT_NO_EMPTY), 0, 100));
-      $in_lead = (mb_stripos(mb_strtolower($first_words), $focus) !== FALSE);
-      $add_check('keyword_in_title', $in_title, $in_title ? t('Focus keyword appears in the title.') : t('Focus keyword not found in the title.'));
-      $add_check('keyword_in_body', $in_lead, $in_lead ? t('Focus keyword appears early in the content.') : t('Focus keyword not found in the beginning of the content.'));
-    }
-  }
-
-  $normalized = ($total_weight > 0) ? round(($score / $total_weight) * 100) : 0;
-  $status = ($normalized >= 80) ? 'GREEN' : (($normalized >= 50) ? 'AMBER' : 'RED');
-
-  $result = array(
-    'score' => $normalized,
-    'status' => $status,
-    'checks' => $checks,
-    'focus' => $focus_keyword,
-  );
-
-  // Optional AEO checks (Answer Engine Optimization) — experimental.
-  $opts_cfg = is_array(config_get('openai_seo_advisor.settings', 'options')) ? config_get('openai_seo_advisor.settings', 'options') : array();
-  if (!empty($opts_cfg['enable_aeo_checks'])) {
-    $result['aeo'] = openai_seo_advisor_analyze_aeo($title, (string) $html_or_text, $text_plain, $desc, (string) $focus_keyword);
-  }
-
-  return $result;
-}
-
-/**
- * Build recommendations based on failed checks.
- */
-/**
- * Analyze Answer Engine Optimization (AEO) signals (rule-only, no API calls).
+ * Load reports include file.
  *
- * @param string $title
- * @param string $html
- * @param string $text_plain
- * @param string $meta_description
- * @param string $focus
- * @return array
- *   Array with keys:
- *   - items: list of arrays with keys {key, pass, level, message}
- *   - featured_snippet_candidate: optional string <= ~60 words
+ * This ensures that report rendering functions are available when needed.
  */
-function openai_seo_advisor_analyze_aeo($title, $html, $text_plain, $meta_description, $focus) {
-  $items = array();
-  $add = function($key, $pass, $level, $message) use (&$items) {
-    $items[] = array(
-      'key' => $key,
-      'pass' => (bool) $pass,
-      'level' => $level, // info|warn|fail
-      'message' => $message,
-    );
-  };
-
-  $title = trim((string) $title);
-  $focus_lc = trim(mb_strtolower((string) $focus));
-  $tp = trim((string) $text_plain);
-  $html = (string) $html;
-
-  // 1) Featured snippet candidate near top (40–60 words, contains focus if provided).
-  $fs_candidate = '';
-  $paras = preg_split('#\n\s*\n#', preg_replace('/\r\n?/', "\n", strip_tags($html, '<p><br><h1><h2><h3><h4>')));
-  $found_good_para = FALSE;
-  if (is_array($paras)) {
-    foreach ($paras as $para) {
-      $p = trim(strip_tags($para));
-      if ($p === '') { continue; }
-      // Count words.
-      $words = preg_split('/\s+/u', $p, -1, PREG_SPLIT_NO_EMPTY);
-      $wc = is_array($words) ? count($words) : 0;
-      if ($wc >= 35 && $wc <= 75) {
-        if ($focus_lc === '' || mb_stripos(mb_strtolower($p), $focus_lc) !== FALSE) {
-          $fs_candidate = $p;
-          $found_good_para = TRUE;
-          break;
-        }
-      }
-      // Stop after first few paragraphs.
-      if (strlen($fs_candidate) === 0 && strlen($p) > 0 && count($paras) > 5) {
-        // Only scan the first ~5 content blocks.
-        if (count($items) > 5) { break; }
-      }
-    }
-  }
-  $add('aeo_featured_snippet_para', $found_good_para, $found_good_para ? 'info' : 'warn', $found_good_para
-    ? t('A concise, featured-snippet style paragraph appears near the top.')
-    : t('Consider adding a concise 40–60 word answer paragraph near the top that uses the focus term.'));
-
-  // 2) Question-style headings and immediate answer.
-  $q_heading = FALSE; $q_immediate = FALSE;
-  if (preg_match_all('/<(h2|h3)\b[^>]*>(.*?)<\/\1>/i', $html, $mh)) {
-    foreach ($mh[2] as $idx => $htext) {
-      $ht = trim(strtolower(strip_tags($htext)));
-      if (preg_match('/^(who|what|when|where|why|how)\b|\?$/i', $ht)) {
-        $q_heading = TRUE;
-        // Attempt to capture the following paragraph text.
-        $after = substr($html, strpos($html, $mh[0][$idx]) + strlen($mh[0][$idx]));
-        if (preg_match('/<(p|ul|ol)\b[^>]*>(.*?)<\/\1>/is', $after, $mn)) {
-          $ans_text = trim(strip_tags($mn[0]));
-          $w = preg_split('/\s+/u', $ans_text, -1, PREG_SPLIT_NO_EMPTY);
-          $wc = is_array($w) ? count($w) : 0;
-          if ($wc > 0 && $wc <= 75) { $q_immediate = TRUE; }
-        }
-        break;
-      }
-    }
-  }
-  $add('aeo_question_headings', $q_heading, $q_heading ? 'info' : 'warn', $q_heading
-    ? t('Found a question-style subheading (H2/H3).')
-    : t('Add a question-style H2/H3 that matches user intent (Who/What/When/Where/Why/How).'));
-  $add('aeo_immediate_answer', $q_immediate, $q_immediate ? 'info' : 'warn', $q_immediate
-    ? t('The paragraph following a question heading is concise (<= 75 words).')
-    : t('Provide a concise answer (<= 75 words) immediately after the question heading.'));
-
-  // 3) Lists/steps for procedural content.
-  $procedural = (bool) preg_match('/\b(how to|steps|guide|procedure|instructions)\b/i', $tp);
-  $has_ordered_list = (bool) preg_match('/<ol\b[^>]*>.*?<\/ol>/is', $html);
-  if ($procedural) {
-    $add('aeo_steps_list', $has_ordered_list, $has_ordered_list ? 'info' : 'warn', $has_ordered_list
-      ? t('Ordered steps present for procedural content.')
-      : t('Add an ordered list (3–8 steps) for procedural content.'));
-  }
-
-  // 4) JSON-LD schema: FAQPage / HowTo (soft checks).
-  $has_faq = (bool) preg_match('/<script\s+type=\"application\/ld\+json\"[^>]*>.*?"@type"\s*:\s*"FAQPage".*?<\/script>/is', $html);
-  $has_howto = (bool) preg_match('/<script\s+type=\"application\/ld\+json\"[^>]*>.*?"@type"\s*:\s*"HowTo".*?<\/script>/is', $html);
-  $add('aeo_schema_faq', $has_faq, $has_faq ? 'info' : 'warn', $has_faq ? t('FAQPage JSON-LD detected.') : t('Consider adding FAQPage schema when multiple Q&A are present.'));
-  $add('aeo_schema_howto', $has_howto, $has_howto ? 'info' : 'warn', $has_howto ? t('HowTo JSON-LD detected.') : t('Consider adding HowTo schema for step-by-step content.'));
-
-  // 5) Crawl/index signals.
-  $has_noindex = (bool) preg_match('/<meta\s+name=\"robots\"[^>]*content=\"[^\"]*noindex/i', $html);
-  $add('aeo_indexable', !$has_noindex, !$has_noindex ? 'info' : 'fail', !$has_noindex ? t('Page appears indexable (no noindex meta found).') : t('Remove noindex if you want this page to surface in answers.'));
-
-  // 6) Headings hierarchy sanity (no huge jumps like H1->H4 without H2/H3).
-  $levels = array();
-  if (preg_match_all('/<h([1-6])\b[^>]*>/i', $html, $mh2)) {
-    foreach ($mh2[1] as $lvl) { $levels[] = (int) $lvl; }
-  }
-  $hierarchy_ok = TRUE;
-  $last = 0;
-  foreach ($levels as $lvl) {
-    if ($last > 0 && $lvl - $last > 1) { $hierarchy_ok = FALSE; break; }
-    $last = $lvl;
-  }
-  if (!empty($levels)) {
-    $add('aeo_heading_hierarchy', $hierarchy_ok, $hierarchy_ok ? 'info' : 'warn', $hierarchy_ok ? t('Headings hierarchy looks logical.') : t('Consider avoiding large jumps in heading levels (e.g., H2 to H4).'));
-  }
-
-  // 7) Links: at least one internal link and optional external citation.
-  $internal = 0; $external = 0;
-  if (preg_match_all('/<a\b[^>]*href\s*=\s*"([^"]+)"/i', $html, $ma)) {
-    foreach ($ma[1] as $href) {
-      $href = trim($href);
-      if ($href === '' || preg_match('#^(mailto:|tel:|javascript:)#i', $href)) { continue; }
-      if (preg_match('#^https?://#i', $href)) {
-        // Assume external unless host matches.
-        $is_internal = FALSE;
-        if (!empty($GLOBALS['base_url'])) {
-          $site_host = parse_url($GLOBALS['base_url'], PHP_URL_HOST);
-          $h = parse_url($href, PHP_URL_HOST);
-          if ($site_host && $h && strcasecmp($site_host, $h) === 0) { $is_internal = TRUE; }
-        }
-        if ($is_internal) { $internal++; } else { $external++; }
-      } else {
-        $internal++;
-      }
-    }
-  }
-  $add('aeo_internal_link', $internal >= 1, $internal >= 1 ? 'info' : 'warn', $internal >= 1 ? t('Contains at least one internal link.') : t('Add a contextual internal link to a related page.'));
-  $add('aeo_external_citation', $external >= 1, $external >= 1 ? 'info' : 'warn', $external >= 1 ? t('Contains an external citation link.') : t('Optionally add an external authoritative citation.'));
-
-  // Suggested featured snippet text (truncate to ~60 words).
-  $fs_text = '';
-  if ($found_good_para && $fs_candidate !== '') {
-    $w = preg_split('/\s+/u', $fs_candidate, -1, PREG_SPLIT_NO_EMPTY);
-    if (count($w) > 60) { $w = array_slice($w, 0, 60); }
-    $fs_text = implode(' ', $w);
-  }
-
-  return array(
-    'items' => $items,
-    'featured_snippet_candidate' => $fs_text,
-  );
-}
-
-function openai_seo_advisor_build_recommendations(array $result) {
-  $recs = array();
-
-  // Classic checks.
-  if (!empty($result['checks']) && is_array($result['checks'])) {
-    foreach ($result['checks'] as $key => $info) {
-      if (!empty($info['pass'])) { continue; }
-      switch ($key) {
-        case 'title_length':
-          $recs[] = t('Aim for a title between 10–60 characters and include the focus keyword once.');
-          break;
-        case 'description_length':
-          $recs[] = t('Write a meta description of 140–160 characters that summarizes the content and includes the focus keyword naturally.');
-          break;
-        case 'word_count':
-          $recs[] = t('Increase the article length to meet the minimum word count and add supporting subheadings.');
-          break;
-        case 'headings':
-          $recs[] = t('Use exactly one H1 and add at least one H2 to structure the content.');
-          break;
-        case 'internal_links':
-          $recs[] = t('Add at least one internal link to a relevant page on this site.');
-          break;
-        case 'images_alt':
-          $recs[] = t('Provide descriptive alt text for all images.');
-          break;
-        case 'keyword_in_title':
-        case 'keyword_in_body':
-          $recs[] = t('Include the focus keyword in the title and early in the content (use naturally, avoid stuffing).');
-          break;
-      }
-    }
-  }
-
-  // AEO-derived recommendations (when enabled).
-  if (!empty($result['aeo']) && !empty($result['aeo']['items']) && is_array($result['aeo']['items'])) {
-    foreach ($result['aeo']['items'] as $it) {
-      if (!empty($it['pass'])) { continue; }
-      $key = !empty($it['key']) ? $it['key'] : '';
-      switch ($key) {
-        case 'aeo_featured_snippet_para':
-          $recs[] = t('Add a 40–60 word answer paragraph near the top (after the H1) that clearly defines the topic and includes the focus term.');
-          break;
-        case 'aeo_question_headings':
-          $recs[] = t('Add a question-style H2/H3 (Who/What/When/Where/Why/How … ?) that matches user intent.');
-          break;
-        case 'aeo_immediate_answer':
-          $recs[] = t('Provide a concise (<= 75 words) answer immediately under the question heading, before any long exposition.');
-          break;
-        case 'aeo_steps_list':
-          $recs[] = t('For procedural content, include an ordered list of 3–8 steps using <ol> to make a scannable How-To.');
-          break;
-        case 'aeo_schema_faq':
-          $recs[] = t('Add FAQPage JSON-LD when you have multiple Q&A (e.g., via Metatag or a schema helper).');
-          break;
-        case 'aeo_schema_howto':
-          $recs[] = t('Add HowTo JSON-LD for step-by-step guides (title, steps, and optional time/cost).');
-          break;
-        case 'aeo_indexable':
-          $recs[] = t('Remove noindex directives if you want this page to be eligible for AI answers and search.');
-          break;
-        case 'aeo_heading_hierarchy':
-          $recs[] = t('Fix heading hierarchy; avoid skipping levels (e.g., go H2 → H3, not H2 → H4).');
-          break;
-        case 'aeo_internal_link':
-          $recs[] = t('Add a contextual internal link to a canonical or deeper related page on your site.');
-          break;
-        case 'aeo_external_citation':
-          $recs[] = t('Cite at least one authoritative external source where appropriate.');
-          break;
-      }
-    }
-  }
-
-  // De-duplicate while preserving order.
-  if (!empty($recs)) {
-    $recs = array_values(array_unique($recs));
-  }
-
-  return $recs;
-}
-
-/**
- * Request compact AI suggestions via contrib OpenAI module (optional).
- */
-function openai_seo_advisor_generate_ai_suggestions($title, $html_text, $raw_text, $meta_description, $focus, $model, $max_tokens) {
-  if (!module_exists('openai') || !class_exists('OpenAIApi')) { return NULL; }
-
-  // Ensure API key configured.
-  $api_key_name = config_get('openai.settings', 'api_key');
-  $api_key = $api_key_name ? key_get_key_value($api_key_name) : '';
-  if (empty($api_key)) { return NULL; }
-
-  // Trim inputs.
-  $excerpt = $raw_text !== '' ? $raw_text : openai_seo_advisor_to_plain($html_text);
-  if (backdrop_strlen($excerpt) > 2000) { $excerpt = backdrop_substr($excerpt, 0, 2000); }
-  if (backdrop_strlen($meta_description) > 200) { $meta_description = backdrop_substr($meta_description, 0, 200); }
-  if (backdrop_strlen($title) > 200) { $title = backdrop_substr($title, 0, 200); }
-
-  $sys = "You are an SEO assistant. Respond with strict JSON only.";
-  $user = array(
-    'title' => $title,
-    'excerpt' => $excerpt,
-    'focus' => $focus,
-    'meta_description' => $meta_description,
-    'instructions' => 'Provide concise improvement tips and 3 title ideas (<=60 chars), 3 meta description ideas (140-160 chars), and 5 short keyword ideas. JSON keys: tips[], title_ideas[], description_ideas[], keywords[]',
-  );
-
-  try {
-    $api = new OpenAIApi($api_key);
-    $messages = array(
-      array('role' => 'system', 'content' => $sys),
-      array('role' => 'user', 'content' => json_encode($user)),
-    );
-    // Use contrib OpenAI chat helper. It returns a string content.
-    $response = $api->chat($model, $messages, 0.3, (int) $max_tokens, FALSE);
-    if (!is_string($response) || $response === '') { return NULL; }
-    $content = $response;
-
-    // Strip Markdown code fences if present.
-    if (preg_match('/^```(json)?\s*(.*?)\s*```$/s', $content, $m)) { $content = $m[2]; }
-
-    $data = json_decode($content, TRUE);
-    if (!is_array($data)) { return NULL; }
-
-    // Normalize arrays.
-    $out = array(
-      'tips' => array(),
-      'title_ideas' => array(),
-      'description_ideas' => array(),
-      'keywords' => array(),
-    );
-    foreach ($out as $k => $_) {
-      if (!empty($data[$k]) && is_array($data[$k])) {
-        // Clean each string a bit.
-        $cleaned = array();
-        foreach ($data[$k] as $s) {
-          if (!is_string($s)) { continue; }
-          $s = trim(preg_replace('/\s+/', ' ', $s));
-          if ($s !== '') { $cleaned[] = $s; }
-        }
-        $out[$k] = $cleaned;
-      }
-    }
-    return $out;
-  }
-  catch (Exception $e) {
-    watchdog('openai_seo_advisor', 'AI suggestions failed: @m', array('@m' => $e->getMessage()), WATCHDOG_WARNING);
-    return NULL;
-  }
-}
-
-/**
- * Generate a comprehensive Full SEO/AEO Audit (HTML) using preview HTML.
- */
-function openai_seo_advisor_generate_ai_audit($title, $preview_html, $meta_description, $focus, $model, $max_tokens) {
-  if (!module_exists('openai') || !class_exists('OpenAIApi')) { return NULL; }
-  $api_key_name = config_get('openai.settings', 'api_key');
-  $api_key = $api_key_name ? key_get_key_value($api_key_name) : '';
-  if (empty($api_key)) { return NULL; }
-
-  // Sanitize and trim HTML input length to control cost.
-  $html = trim((string) $preview_html);
-  // Remove scripts/styles for safety; keep content.
-  $html = preg_replace('#<script\b[^>]*>.*?</script>#is', '', $html);
-  $html = preg_replace('#<style\b[^>]*>.*?</style>#is', '', $html);
-  if (backdrop_strlen($html) > 12000) { $html = backdrop_substr($html, 0, 12000) . "\n<!-- truncated -->"; }
-
-  $aeo_opts = is_array(config_get('openai_seo_advisor.settings', 'options')) ? config_get('openai_seo_advisor.settings', 'options') : array();
-  $aeo_append = '';
-  if (!empty($aeo_opts['enable_aeo_ai_audit'])) {
-    $aeo_append = "\n\nAlso include an AEO (Answer Engine Optimization) section with:\n- One <=60-word featured-snippet style summary paragraph.\n- Up to 5 Q&A pairs likely to match People Also Ask/FAQ (use concise answers).\n- Note any missing FAQPage/HowTo schema opportunities.\n";
-  }
-
-  $prompt = "Objective: Assume the role of an expert SEO consultant specializing in Backdrop CMS websites. Your task is to conduct a comprehensive on-page SEO audit of the HTML page content provided below. The goal is to produce a formal, actionable SEO audit report specifically tailored for Backdrop, identifying areas for improvement to enhance search engine visibility and user engagement.\n\nContext: The HTML content is provided below as actual HTML. This audit is for a Backdrop website. Recommendations should be Backdrop-centric where applicable.\n\nInstructions: Produce a professional, structured HTML report (not Markdown) with clear headings and bullet lists. Cover: (1) Topic Authority, (2) Meta Tags, (3) Heading Structure, (4) Keyword Integration, (5) Natural Language & Readability, (6) Image SEO, (7) Links, (8) URL Structure, (9) Backdrop Performance, (10) Accessibility, (11) Schema Markup, (12) Canonicalization. Conclude with: (a) Executive Summary, (b) Key Areas by impact, and (c) Detailed Drupal-specific Recommendations. Provide examples in the same language as the content. Include a prioritized, actionable fixes section with at least 8 items, grouped into Quick wins (low effort/high impact), Medium, and Advanced. Avoid tables unless necessary." . $aeo_append . "\n\nPage title: " . $title . "\nFocus keyword (optional): " . $focus . "\nExisting meta description (optional): " . $meta_description . "\n\n--- BEGIN HTML PREVIEW ---\n" . $html . "\n--- END HTML PREVIEW ---\n";
-
-  try {
-    $api = new OpenAIApi($api_key);
-    $messages = array(
-      array('role' => 'system', 'content' => 'You are a senior SEO auditor for Backdrop CMS. Respond with sanitized HTML only.'),
-      array('role' => 'user', 'content' => $prompt),
-    );
-    // Allocate more tokens for long-form audit, but cap by setting.
-    $mt = max(256, min(2048, (int) $max_tokens));
-    $resp = $api->chat($model, $messages, 0.2, $mt, FALSE);
-    if (!is_string($resp) || $resp === '') { return NULL; }
-    // Strip code fences if any (markdown or html).
-    if (preg_match('/^```(markdown|md|html|htm)?\s*(.*?)\s*```$/s', $resp, $m)) { $resp = $m[2]; }
-    return trim($resp);
-  }
-  catch (Exception $e) {
-    watchdog('openai_seo_advisor', 'AI audit failed: @m', array('@m' => $e->getMessage()), WATCHDOG_WARNING);
-    return NULL;
+function openai_seo_advisor_include_reports() {
+  static $loaded = FALSE;
+  if (!$loaded) {
+    module_load_include('inc', 'openai_seo_advisor', 'openai_seo_advisor.reports');
+    $loaded = TRUE;
   }
 }

@@ -30,9 +30,8 @@
   },
   "options": {
     "ai_model": "gpt-4o-mini",
-    "ai_max_tokens": 256,
+    "ai_max_tokens": 512,
     "ai_full_audit_mode": 0,
     "log_ai_input": 0
   }
 }
-
