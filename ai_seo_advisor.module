@@ -1,0 +1,346 @@
+<?php
+
+/**
+ * @file
+ * AI SEO Advisor module.
+ *
+ * Provides a SEO analysis panel on node edit forms. Performs
+ * rules-only checks locally and can optionally request AI suggestions when
+ * an AI provider is configured. Never modifies contrib.
+ */
+
+/**
+ * Implements hook_ai_tools().
+ */
+function ai_seo_advisor_ai_tools() {
+  if (!module_exists('ai_tools')) {
+    return [];
+  }
+  module_load_include('inc', 'ai_seo_advisor', 'includes/seo.tools');
+  return ai_seo_advisor_tools_definitions();
+}
+
+/**
+ * Implements hook_config_info().
+ */
+function ai_seo_advisor_config_info() {
+  return [
+    'ai_seo_advisor.settings' => [
+      'label' => t('AI SEO Advisor Settings'),
+      'group' => t('AI'),
+    ],
+    'ai_seo_advisor.report_type' => [
+      'name_key' => 'name',
+      'label_key' => 'label',
+      'group' => t('AI'),
+    ],
+  ];
+}
+
+/**
+ * Implements hook_autoload_info().
+ */
+function ai_seo_advisor_autoload_info() {
+  return [
+    'AiSEOReport' => 'includes/ai_seo_report.entity.inc',
+    'AiSEOReportController' => 'includes/ai_seo_report.entity.inc',
+  ];
+}
+
+/**
+ * Implements hook_init().
+ */
+function ai_seo_advisor_init() {
+  // Keep warning messages visible for both visual users and assistive tech.
+}
+
+/**
+ * Implements hook_permission().
+ */
+function ai_seo_advisor_permission() {
+  return [
+    'analyze content seo with ai' => [
+      'title' => t('Analyze content SEO with AI'),
+      'description' => t('Use the SEO Advisor panel on node forms and run analysis.'),
+    ],
+    'view ai seo reports' => [
+      'title' => t('View AI SEO reports'),
+      'description' => t('View saved SEO analysis reports on content pages.'),
+    ],
+    'administer ai seo settings' => [
+      'title' => t('Administer AI SEO Advisor settings'),
+      'description' => t('Configure the AI SEO Advisor module.'),
+    ],
+  ];
+}
+
+/**
+ * Implements hook_entity_info().
+ */
+function ai_seo_advisor_entity_info() {
+  $info = [];
+
+  $info['ai_seo_report'] = [
+    'label' => t('SEO Report'),
+    'plural label' => t('SEO Reports'),
+    'entity class' => 'AiSEOReport',
+    'controller class' => 'AiSEOReportController',
+    'base table' => 'ai_seo_report',
+    'fieldable' => FALSE,
+    'entity keys' => [
+      'id' => 'report_id',
+    ],
+    'bundles' => [],
+    'view modes' => [
+      'full' => [
+        'label' => t('Full report'),
+        'custom settings' => FALSE,
+      ],
+    ],
+    'module' => 'ai_seo_advisor',
+    'access callback' => 'ai_seo_advisor_report_access',
+  ];
+
+  return $info;
+}
+
+/**
+ * Access callback for SEO reports.
+ */
+function ai_seo_advisor_report_access($op, $report = NULL, $account = NULL) {
+  if (empty($account)) {
+    global $user;
+    $account = $user;
+  }
+
+  if (user_access('administer ai seo settings', $account)) {
+    return TRUE;
+  }
+
+  if ($op == 'view' && user_access('view ai seo reports', $account)) {
+    return TRUE;
+  }
+
+  if ($op == 'create' && user_access('analyze content seo with ai', $account)) {
+    return TRUE;
+  }
+
+  if ($op == 'update' || $op == 'delete') {
+    if (user_access('administer ai seo settings', $account)) {
+      return TRUE;
+    }
+  }
+
+  return FALSE;
+}
+
+/**
+ * Implements hook_menu().
+ */
+function ai_seo_advisor_menu() {
+  $items = [];
+
+  $items['admin/config/ai/ai-seo'] = [
+    'title' => 'AI SEO Advisor',
+    'description' => 'Configure the SEO analysis panel and AI suggestions.',
+    'page callback' => 'backdrop_get_form',
+    'page arguments' => ['ai_seo_advisor_settings_form'],
+    'access arguments' => ['administer ai seo settings'],
+    'file' => 'ai_seo_advisor.admin.inc',
+    'type' => MENU_NORMAL_ITEM,
+  ];
+
+  $items['admin/config/ai/ai-seo/settings'] = [
+    'title' => 'Settings',
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+    'weight' => -10,
+  ];
+
+  $items['admin/config/ai/ai-seo/report-types'] = [
+    'title' => 'Report Types',
+    'description' => 'Manage SEO report type configurations.',
+    'page callback' => 'ai_seo_advisor_report_types_list',
+    'access arguments' => ['administer ai seo settings'],
+    'file' => 'ai_seo_advisor.admin.inc',
+    'type' => MENU_LOCAL_TASK,
+    'weight' => 0,
+  ];
+
+  $items['admin/config/ai/ai-seo/report-types/add'] = [
+    'title' => 'Add Report Type',
+    'page callback' => 'backdrop_get_form',
+    'page arguments' => ['ai_seo_advisor_report_type_form'],
+    'access arguments' => ['administer ai seo settings'],
+    'file' => 'ai_seo_advisor.admin.inc',
+    'type' => MENU_LOCAL_ACTION,
+  ];
+
+  $items['admin/config/ai/ai-seo/report-types/%/edit'] = [
+    'title' => 'Edit Report Type',
+    'page callback' => 'backdrop_get_form',
+    'page arguments' => ['ai_seo_advisor_report_type_form', 5],
+    'access arguments' => ['administer ai seo settings'],
+    'file' => 'ai_seo_advisor.admin.inc',
+    'type' => MENU_CALLBACK,
+  ];
+
+  $items['admin/config/ai/ai-seo/report-types/%/delete'] = [
+    'title' => 'Delete Report Type',
+    'page callback' => 'backdrop_get_form',
+    'page arguments' => ['ai_seo_advisor_report_type_delete_form', 5],
+    'access arguments' => ['administer ai seo settings'],
+    'file' => 'ai_seo_advisor.admin.inc',
+    'type' => MENU_CALLBACK,
+  ];
+
+  $items['node/%node/ai-seo'] = [
+    'title' => 'SEO Reports',
+    'page callback' => 'ai_seo_advisor_reports_page',
+    'page arguments' => [1],
+    'access callback' => 'ai_seo_advisor_node_reports_access',
+    'access arguments' => [1],
+    'file' => 'ai_seo_advisor.pages.inc',
+    'type' => MENU_LOCAL_TASK,
+    'weight' => 10,
+  ];
+
+  $items['node/%node/ai-seo/%ai_seo_report/view'] = [
+    'title' => 'View Report',
+    'page callback' => 'ai_seo_advisor_report_view',
+    'page arguments' => [1, 3],
+    'access callback' => 'ai_seo_advisor_report_access',
+    'access arguments' => ['view', 3],
+    'file' => 'ai_seo_advisor.pages.inc',
+    'type' => MENU_CALLBACK,
+  ];
+
+  $items['node/%node/ai-seo/%ai_seo_report/delete'] = [
+    'title' => 'Delete Report',
+    'page callback' => 'backdrop_get_form',
+    'page arguments' => ['ai_seo_advisor_report_delete_form', 1, 3],
+    'access callback' => 'ai_seo_advisor_report_access',
+    'access arguments' => ['delete', 3],
+    'file' => 'ai_seo_advisor.pages.inc',
+    'type' => MENU_CALLBACK,
+  ];
+
+  return $items;
+}
+
+/**
+ * Loader for SEO reports.
+ */
+function ai_seo_report_load($report_id) {
+  $reports = entity_load('ai_seo_report', [$report_id]);
+  return $reports ? reset($reports) : FALSE;
+}
+
+/**
+ * Title callback for report type edit form.
+ */
+function ai_seo_advisor_report_type_title($name) {
+  $config = config('ai_seo_advisor.report_type.' . $name);
+  return $config->get('label');
+}
+
+/**
+ * Access callback for node SEO tab.
+ */
+function ai_seo_advisor_node_reports_access($node) {
+  if (!user_access('view ai seo reports') && !user_access('administer ai seo settings')) {
+    return FALSE;
+  }
+
+  $config = config('ai_seo_advisor.settings');
+  $enabled_bundles = $config->get('enabled_bundles');
+  if (empty($enabled_bundles) || !is_array($enabled_bundles)) {
+    return FALSE;
+  }
+
+  return !empty($enabled_bundles[$node->type]);
+}
+
+
+
+
+/**
+ * Implements hook_menu_alter().
+ */
+function ai_seo_advisor_menu_alter(&$items) {
+  // Nothing to alter currently
+}
+
+/**
+ * Implements hook_theme().
+ */
+function ai_seo_advisor_theme($existing, $type, $theme, $path) {
+  return [
+    'ai_seo_advisor_report' => [
+      'variables' => [
+        'report_html' => '',
+        'has_error' => FALSE,
+        'error_message' => '',
+      ],
+      'template' => 'ai-seo-advisor-report',
+      'path' => backdrop_get_path('module', 'ai_seo_advisor') . '/templates',
+    ],
+  ];
+}
+
+/**
+ * Implements hook_form_alter().
+ */
+function ai_seo_advisor_form_alter(&$form, &$form_state, $form_id) {
+  // Currently only using analyze form on dedicated SEO tab
+}
+
+/**
+ * Get all available report types.
+ */
+function ai_seo_advisor_get_report_types() {
+  $types = [];
+  $configs = config_get_names_with_prefix('ai_seo_advisor.report_type.');
+
+  foreach ($configs as $config_name) {
+    $config = config($config_name);
+    $name = str_replace('ai_seo_advisor.report_type.', '', $config_name);
+    $types[$name] = [
+      'name' => $name,
+      'label' => $config->get('label'),
+      'description' => $config->get('description'),
+      'prompt' => $config->get('prompt'),
+      'status' => $config->get('status'),
+      'weight' => $config->get('weight'),
+    ];
+  }
+
+  uasort($types, function($a, $b) {
+    if ($a['weight'] == $b['weight']) {
+      return strcmp($a['label'], $b['label']);
+    }
+    return $a['weight'] < $b['weight'] ? -1 : 1;
+  });
+
+  return $types;
+}
+
+/**
+ * Check if a report type exists.
+ */
+function ai_seo_advisor_report_type_exists($name) {
+  $config = config('ai_seo_advisor.report_type.' . $name);
+  return !$config->isNew();
+}
+
+/**
+ * Load reports include file.
+ *
+ * This ensures that report rendering functions are available when needed.
+ */
+function ai_seo_advisor_include_reports() {
+  static $loaded = FALSE;
+  if (!$loaded) {
+    module_load_include('inc', 'ai_seo_advisor', 'ai_seo_advisor.reports');
+    $loaded = TRUE;
+  }
+}

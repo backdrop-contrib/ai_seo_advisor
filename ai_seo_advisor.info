@@ -1,0 +1,7 @@
+name = AI SEO Advisor
+description = AI-powered SEO content recommendations and optimization analysis.
+backdrop = 1.x
+type = module
+package = AI
+dependencies[] = ai
+configure = admin/config/ai/ai-seo

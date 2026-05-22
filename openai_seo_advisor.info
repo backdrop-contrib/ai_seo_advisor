@@ -1,9 +1,0 @@
-name = OpenAI SEO Advisor
-description = Provides a SEO analysis panel on node edit forms, with rules-based checks and optional AI suggestions (future phase).
-package = OpenAI
-type = module
-backdrop = 1.x
-dependencies[] = openai
-dependencies[] = entity_plus
-configure = admin/config/openai/seo
-

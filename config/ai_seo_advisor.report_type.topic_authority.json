@@ -1,5 +1,5 @@
 {
-  "_config_name": "openai_seo_advisor.report_type.topic_authority",
+  "_config_name": "ai_seo_advisor.report_type.topic_authority",
   "name": "topic_authority",
   "label": "Topic authority",
   "description": "Analyze the content for topic authority and depth for SEO best practices.",

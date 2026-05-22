@@ -1,5 +1,5 @@
 {
-  "_config_name": "openai_seo_advisor.report_type.link_analysis",
+  "_config_name": "ai_seo_advisor.report_type.link_analysis",
   "name": "link_analysis",
   "label": "Link analysis",
   "description": "Analyze the use of internal and external links for SEO best practices.",

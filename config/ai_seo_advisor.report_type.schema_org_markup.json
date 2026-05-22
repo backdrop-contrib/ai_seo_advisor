@@ -1,5 +1,5 @@
 {
-  "_config_name": "openai_seo_advisor.report_type.schema_org_markup",
+  "_config_name": "ai_seo_advisor.report_type.schema_org_markup",
   "name": "schema_org_markup",
   "label": "Schema.org markup",
   "description": "Use of Schema.org on current site along with additional suggestions.",

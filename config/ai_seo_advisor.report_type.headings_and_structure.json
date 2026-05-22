@@ -1,5 +1,5 @@
 {
-  "_config_name": "openai_seo_advisor.report_type.headings_and_structure",
+  "_config_name": "ai_seo_advisor.report_type.headings_and_structure",
   "name": "headings_and_structure",
   "label": "Headings and Structure",
   "description": "Analyze the use of headings (H1, H2, H3, etc.) and overall content structure for SEO best practices.",

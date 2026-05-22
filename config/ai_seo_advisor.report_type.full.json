@@ -1,5 +1,5 @@
 {
-    "_config_name": "openai_seo_advisor.report_type.full",
+    "_config_name": "ai_seo_advisor.report_type.full",
     "name": "full",
     "label": "Full SEO Analysis",
     "description": "Comprehensive SEO audit covering all aspects including meta tags, content, structure, and technical elements.",

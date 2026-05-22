@@ -1,7 +1,7 @@
 <?php
 /**
  * @file
- * Template for OpenAI SEO Advisor report display.
+ * Template for AI SEO Advisor report display.
  *
  * Available variables:
  * - $report_html: The formatted HTML report content with accordions.
@@ -12,7 +12,7 @@
 <?php if ($has_error): ?>
   <div class="messages error"><?php print $error_message; ?></div>
 <?php else: ?>
-  <div class="openai-seo-ai-report">
+  <div class="ai-seo-ai-report">
     <?php print $report_html; ?>
   </div>
 <?php endif; ?>

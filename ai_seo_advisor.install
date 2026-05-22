@@ -1,16 +1,16 @@
 <?php
 /**
  * @file
- * Install, update and uninstall functions for the OpenAI SEO Advisor module.
+ * Install, update and uninstall functions for the AI SEO Advisor module.
  */
 
 /**
  * Implements hook_schema().
  */
-function openai_seo_advisor_schema() {
+function ai_seo_advisor_schema() {
   $schema = array();
 
-  $schema['openai_seo_report'] = array(
+  $schema['ai_seo_report'] = array(
     'description' => 'Stores SEO analysis reports for content.',
     'fields' => array(
       'report_id' => array(
@@ -113,43 +113,67 @@ function openai_seo_advisor_schema() {
 /**
  * Implements hook_install().
  */
-function openai_seo_advisor_install() {
+function ai_seo_advisor_install() {
+  if (!module_load_install('ai_upgrade')) { return []; }
+  ai_upgrade_module_install('ai_seo_advisor');
+
   // Report types are now loaded from individual config files.
   // They are automatically imported from the config/ directory.
 }
 
 /**
- * Remove unused columns from openai_seo_report table.
+ * Implements hook_requirements().
  */
-function openai_seo_advisor_update_1001() {
+function ai_seo_advisor_requirements($phase) {
+  if (!module_load_install('ai_upgrade')) { return []; }
+  return ai_upgrade_module_requirements($phase, 'ai_seo_advisor');
+}
+
+/**
+ * Rename openai_seo_report table to ai_seo_report.
+ */
+function ai_seo_advisor_update_1002() {
+  if (db_table_exists('openai_seo_report') && !db_table_exists('ai_seo_report')) {
+    db_rename_table('openai_seo_report', 'ai_seo_report');
+  }
+  elseif (db_table_exists('openai_seo_report')) {
+    db_drop_table('openai_seo_report');
+  }
+  return t('Renamed openai_seo_report to ai_seo_report.');
+}
+
+/**
+ * Remove unused columns from ai_seo_report table.
+ */
+function ai_seo_advisor_update_1001() {
   // Drop focus_keyword, score, and status columns - we don't use them anymore
-  if (db_field_exists('openai_seo_report', 'focus_keyword')) {
-    db_drop_field('openai_seo_report', 'focus_keyword');
+  if (db_field_exists('ai_seo_report', 'focus_keyword')) {
+    db_drop_field('ai_seo_report', 'focus_keyword');
   }
-  if (db_field_exists('openai_seo_report', 'score')) {
-    db_drop_field('openai_seo_report', 'score');
+  if (db_field_exists('ai_seo_report', 'score')) {
+    db_drop_field('ai_seo_report', 'score');
   }
-  if (db_field_exists('openai_seo_report', 'status')) {
-    db_drop_field('openai_seo_report', 'status');
+  if (db_field_exists('ai_seo_report', 'status')) {
+    db_drop_field('ai_seo_report', 'status');
   }
   
-  return t('Removed deprecated columns from openai_seo_report table.');
+  return t('Removed deprecated columns from ai_seo_report table.');
 }
 
 /**
  * Migrate from combined report_types config to individual config files.
  */
-function openai_seo_advisor_update_1000() {
+function ai_seo_advisor_update_1000() {
   // Check if old combined config exists.
-  $old_config = config('openai_seo_advisor.report_types');
+  $old_config = config('ai_seo_advisor.report_types');
   $types = $old_config->get();
   
   if (!empty($types) && is_array($types)) {
     // Migrate each report type to its own config file.
     foreach ($types as $name => $type_data) {
       if (is_array($type_data) && !empty($type_data['name'])) {
-        $new_config = config('openai_seo_advisor.report_type.' . $name);
-        $new_config->set('_config_name', 'openai_seo_advisor.report_type.' . $name);
+        $new_config = config('ai_seo_advisor.report_type.' . $name);
+        $new_config->set('_config_name', 'ai_seo_advisor.report_type.' . $name);
         $new_config->set('name', $type_data['name']);
         $new_config->set('label', !empty($type_data['label']) ? $type_data['label'] : $name);
         $new_config->set('description', !empty($type_data['description']) ? $type_data['description'] : '');
@@ -172,16 +196,16 @@ function openai_seo_advisor_update_1000() {
 /**
  * Implements hook_uninstall().
  */
-function openai_seo_advisor_uninstall() {
+function ai_seo_advisor_uninstall() {
   // Remove all report type configurations (individual files).
-  $config_names = config_get_names_with_prefix('openai_seo_advisor.report_type.');
+  $config_names = config_get_names_with_prefix('ai_seo_advisor.report_type.');
   foreach ($config_names as $config_name) {
     config($config_name)->delete();
   }
   
   // Remove settings.
-  config('openai_seo_advisor.settings')->delete();
+  config('ai_seo_advisor.settings')->delete();
   
   // Remove old combined config if it exists.
-  config('openai_seo_advisor.report_types')->delete();
+  config('ai_seo_advisor.report_types')->delete();
 }

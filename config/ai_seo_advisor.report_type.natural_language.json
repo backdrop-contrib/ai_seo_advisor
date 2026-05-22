@@ -1,5 +1,5 @@
 {
-  "_config_name": "openai_seo_advisor.report_type.natural_language",
+  "_config_name": "ai_seo_advisor.report_type.natural_language",
   "name": "natural_language",
   "label": "Natural language use",
   "description": "Analyze the natural language use, readability, and conversational tone for SEO best practices.",
