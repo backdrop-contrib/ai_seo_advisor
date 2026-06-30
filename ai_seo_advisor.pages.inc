@@ -8,6 +8,10 @@
  * Page callback: Display list of SEO reports for a node.
  */
 function ai_seo_advisor_reports_page($node) {
+  if (!module_exists('entity_plus')) {
+    return ['#markup' => '<p>' . t('The entity_plus module is required to view SEO reports.') . '</p>'];
+  }
+
   backdrop_set_title(t('SEO Reports for @title', ['@title' => check_plain($node->title)]), PASS_THROUGH);
 
   $output = [];
@@ -356,6 +360,11 @@ function ai_seo_advisor_report_delete_form_submit($form, &$form_state) {
   $report_id = $form_state['values']['report_id'];
   $node = $form_state['values']['node'];
 
+  if (!module_exists('entity_plus')) {
+    backdrop_set_message(t('The entity_plus module is required to delete SEO reports.'), 'error');
+    $form_state['redirect'] = 'node/' . $node->nid . '/ai-seo';
+    return;
+  }
   $report = entity_load('ai_seo_report', $report_id);
   if ($report) {
     $report->delete();
