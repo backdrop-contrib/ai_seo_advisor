@@ -41,6 +41,9 @@ function ai_seo_advisor_config_info() {
  * Implements hook_autoload_info().
  */
 function ai_seo_advisor_autoload_info() {
+  if (!module_exists('entity_plus')) {
+    return [];
+  }
   return [
     'AiSEOReport' => 'includes/ai_seo_report.entity.inc',
     'AiSEOReportController' => 'includes/ai_seo_report.entity.inc',

@@ -321,7 +321,7 @@ function ai_seo_advisor_report_type_form_submit($form, &$form_state) {
  */
 function ai_seo_advisor_report_type_delete_form($form, &$form_state, $name) {
   // Don't allow deleting default types.
-  if (in_array($name, ['full', 'aeo'])) {
+  if (in_array($name, ['full', 'aeo', 'seo_analysis'])) {
     backdrop_set_message(t('Cannot delete default report types.'), 'error');
     backdrop_goto('admin/config/ai/ai-seo/report-types');
   }

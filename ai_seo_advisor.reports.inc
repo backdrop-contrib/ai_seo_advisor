@@ -166,7 +166,7 @@ function ai_seo_advisor_normalize_ai_report_html($report) {
     $report = preg_replace('/\s+(?=\*\*[^*]{2,80}\*\*)/', "\n", $report);
     $report = preg_replace('/\s+(?=\d+[.)]\s+)/', "\n", $report);
     $report = preg_replace('/\s+(?=\*\s+)/', "\n", $report);
-    $report = preg_replace('/\s+(?=[-+]\s+)/', "\n", $report);
+    $report = preg_replace('/(?<=[.!?:])\s+(?=[-+]\s+)/', "\n", $report);
   }
 
   // Additional splitting for compact outputs that mix headings/lists inline.
