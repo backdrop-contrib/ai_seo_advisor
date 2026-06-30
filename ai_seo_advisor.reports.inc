@@ -143,8 +143,8 @@ function ai_seo_advisor_normalize_ai_report_html($report) {
 
   $has_html = (bool) preg_match('/<(h[1-6]|p|ul|ol|li|details|summary|pre|table|div|section|article|br)\b/i', $report);
   $has_markdown = (strpos($report, '**') !== FALSE)
-    || (bool) preg_match('/(^|\s)[*+-]\s+\S/', $report)
-    || (bool) preg_match('/(^|\s)\d+[.)]\s+\S/', $report);
+    || (bool) preg_match('/(?:^|\n)[*+-]\s+\S/', $report)
+    || (bool) preg_match('/(?:^|\n)\d+[.)]\s+\S/', $report);
 
   // If it's already HTML and doesn't look markdown-ish, keep it.
   if ($has_html && !$has_markdown) {
@@ -435,7 +435,7 @@ function ai_seo_advisor_analyze($title, $html_or_text, $meta_description, $focus
 
     // Regex fallback if DOM fails.
     if (!$counted) {
-      if (preg_match_all('/<a\b[^>]*href\s*=\s*["\']([^"\']+)["\']/i', $html, $m)) {
+      if (preg_match_all('/<a\b[^>]*href\s*=\s*["\'"]?([^"\'"\s>]+)["\'"]?/i', $html, $m)) {
         foreach ($m[1] as $href) {
           $href = trim($href);
           if ($href === '') { continue; }
@@ -569,7 +569,7 @@ function ai_seo_advisor_generate_ai_suggestions($title, $html_text, $raw_text, $
   }
   else {
     // Fallback if report type not found or has no prompt.
-    $report_type_prompt = 'Provide concise improvement tips and up to 5 prioritized action recommendations (each <=28 words). Also return 3 title ideas (<=60 chars), 3 meta description ideas (140-160 chars), and 8 keyword suggestions. JSON keys: tips[], recommendations[], title_ideas[], description_ideas[], keywords[]';
+    $report_type_prompt = 'Analyze this page for SEO and write a concise HTML report. Include: improvement tips, up to 5 prioritized recommendations, 3 title ideas (under 60 characters), 3 meta description ideas (140-160 characters), and 8 keyword suggestions. Use HTML headings and lists for structure.';
   }
 
   // Build full system prompt: system_prompt + site_context.

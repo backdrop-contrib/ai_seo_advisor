@@ -81,6 +81,9 @@ function ai_seo_advisor_permission() {
  * Implements hook_entity_info().
  */
 function ai_seo_advisor_entity_info() {
+  if (!module_exists('entity_plus')) {
+    return [];
+  }
   $info = [];
 
   $info['ai_seo_report'] = [
@@ -234,6 +237,9 @@ function ai_seo_advisor_menu() {
  * Loader for SEO reports.
  */
 function ai_seo_report_load($report_id) {
+  if (!module_exists('entity_plus')) {
+    return FALSE;
+  }
   $reports = entity_load('ai_seo_report', [$report_id]);
   return $reports ? reset($reports) : FALSE;
 }
