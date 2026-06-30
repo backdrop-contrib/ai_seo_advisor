@@ -32,9 +32,8 @@ function ai_seo_advisor_render_results(array $result) {
     $formatted = '';
 
     // First, replace any H1 tags with H2 (H1 is reserved for page title)
-    $report_html = preg_replace('/<h1([^>]*)>/', '<h2$1>', $report_html);
-    $report_html = preg_replace('/<\/h1>/', '</h2>', $report_html);
-
+    $report_html = preg_replace('/<h1([^>]*)>/i', '<h2$1>', $report_html);
+    $report_html = preg_replace('/<\/h1>/i', '</h2>', $report_html);
     // Split content by H2 tags that start with numbers (the main sections)
     $parts = preg_split('/(<h2[^>]*>\s*\d+\..*?<\/h2>)/s', $report_html, -1, PREG_SPLIT_DELIM_CAPTURE);
 
@@ -143,9 +142,9 @@ function ai_seo_advisor_normalize_ai_report_html($report) {
 
   $has_html = (bool) preg_match('/<(h[1-6]|p|ul|ol|li|details|summary|pre|table|div|section|article|br)\b/i', $report);
   $has_markdown = (strpos($report, '**') !== FALSE)
+    || (bool) preg_match('/(?:^|\n)#{1,6}\s+\S/', $report)
     || (bool) preg_match('/(?:^|\n)[*+-]\s+\S/', $report)
     || (bool) preg_match('/(?:^|\n)\d+[.)]\s+\S/', $report);
-
   // If it's already HTML and doesn't look markdown-ish, keep it.
   if ($has_html && !$has_markdown) {
     return trim($report);
