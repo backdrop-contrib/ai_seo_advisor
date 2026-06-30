@@ -125,8 +125,26 @@ function ai_seo_advisor_install() {
  * Implements hook_requirements().
  */
 function ai_seo_advisor_requirements($phase) {
-  if (!module_load_install('ai_upgrade')) { return []; }
-  return ai_upgrade_module_requirements($phase, 'ai_seo_advisor');
+  $requirements = [];
+
+  // Verify entity_plus is enabled at runtime so existing sites upgrading
+  // cannot reach AiSEOReportController (which extends EntityPlusController)
+  // without the dependency present.
+  if ($phase === 'runtime') {
+    if (!module_exists('entity_plus')) {
+      $requirements['ai_seo_advisor_entity_plus'] = [
+        'title' => t('AI SEO Advisor'),
+        'value' => t('entity_plus module is missing'),
+        'description' => t('The AI SEO Advisor module requires the entity_plus module to be enabled. Enable entity_plus before using this module.'),
+        'severity' => REQUIREMENT_ERROR,
+      ];
+    }
+  }
+
+  if (!module_load_install('ai_upgrade')) {
+    return $requirements;
+  }
+  return $requirements + ai_upgrade_module_requirements($phase, 'ai_seo_advisor');
 }
 
 /**
@@ -143,21 +161,57 @@ function ai_seo_advisor_update_1002() {
 }
 
 /**
- * Remove unused columns from ai_seo_report table.
+ * Formerly removed columns from ai_seo_report; now a no-op.
+ *
+ * hook_schema() and the AiSEOReport entity still declare and write
+ * focus_keyword, score, and status, so dropping them broke every subsequent
+ * report save on sites that ran this update. Update 1003 restores the
+ * columns where they are missing.
  */
 function ai_seo_advisor_update_1001() {
-  // Drop focus_keyword, score, and status columns - we don't use them anymore
-  if (db_field_exists('ai_seo_report', 'focus_keyword')) {
-    db_drop_field('ai_seo_report', 'focus_keyword');
+  return t('No schema changes (deprecated update).');
+}
+
+/**
+ * Restore columns dropped by the old update 1001 where missing.
+ */
+function ai_seo_advisor_update_1003() {
+  // Field specs are frozen at this update's version. Do not read from
+  // ai_seo_advisor_schema() — later schema changes must not alter this
+  // historical migration.
+  $fields = [
+    'focus_keyword' => [
+      'type' => 'varchar',
+      'length' => 255,
+      'not null' => FALSE,
+      'description' => 'The focus keyword used for analysis.',
+    ],
+    'score' => [
+      'type' => 'int',
+      'not null' => TRUE,
+      'default' => 0,
+      'description' => 'The overall SEO score (0-100).',
+    ],
+    'status' => [
+      'type' => 'varchar',
+      'length' => 16,
+      'not null' => TRUE,
+      'default' => 'RED',
+      'description' => 'The status: GREEN, AMBER, or RED.',
+    ],
+  ];
+  $restored = [];
+  if (db_table_exists('ai_seo_report')) {
+    foreach ($fields as $field => $spec) {
+      if (!db_field_exists('ai_seo_report', $field)) {
+        db_add_field('ai_seo_report', $field, $spec);
+        $restored[] = $field;
+      }
+    }
   }
-  if (db_field_exists('ai_seo_report', 'score')) {
-    db_drop_field('ai_seo_report', 'score');
-  }
-  if (db_field_exists('ai_seo_report', 'status')) {
-    db_drop_field('ai_seo_report', 'status');
-  }
-  
-  return t('Removed deprecated columns from ai_seo_report table.');
+  return $restored
+    ? t('Restored ai_seo_report column(s): @cols.', ['@cols' => implode(', ', $restored)])
+    : t('ai_seo_report columns already match the schema.');
 }
 
 /**

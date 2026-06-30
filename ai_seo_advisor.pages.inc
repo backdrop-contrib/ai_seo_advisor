@@ -8,6 +8,10 @@
  * Page callback: Display list of SEO reports for a node.
  */
 function ai_seo_advisor_reports_page($node) {
+  if (!module_exists('entity_plus')) {
+    return ['#markup' => '<p>' . t('The entity_plus module is required to view SEO reports.') . '</p>'];
+  }
+
   backdrop_set_title(t('SEO Reports for @title', ['@title' => check_plain($node->title)]), PASS_THROUGH);
 
   $output = [];
@@ -57,9 +61,9 @@ function ai_seo_advisor_reports_page($node) {
   foreach ($reports as $report) {
     $user = user_load($report->uid);
     $operations = [];
-    $operations[] = l(t('View'), 'node/' . $node->nid . '/seo/' . $report->report_id . '/view');
+    $operations[] = l(t('View'), 'node/' . $node->nid . '/ai-seo/' . $report->report_id . '/view');
     if (ai_seo_advisor_report_access('delete', $report)) {
-      $operations[] = l(t('Delete'), 'node/' . $node->nid . '/seo/' . $report->report_id . '/delete');
+      $operations[] = l(t('Delete'), 'node/' . $node->nid . '/ai-seo/' . $report->report_id . '/delete');
     }
 
     // Get report type label.
@@ -104,7 +108,7 @@ function ai_seo_advisor_report_view($node, $report) {
   $breadcrumb = [
     l(t('Home'), '<front>'),
     l($node->title, 'node/' . $node->nid),
-    l(t('SEO Reports'), 'node/' . $node->nid . '/seo'),
+    l(t('SEO Reports'), 'node/' . $node->nid . '/ai-seo'),
   ];
   backdrop_set_breadcrumb($breadcrumb);
 
@@ -155,7 +159,7 @@ function ai_seo_advisor_analyze_form($form, &$form_state, $node) {
   }
 
   if (empty($report_type_options)) {
-    $report_type_options['full'] = t('Full SEO Analysis (default]');
+    $report_type_options['full'] = t('Full SEO Analysis (default)');
   }
 
   $form['report_type'] = [
@@ -220,7 +224,7 @@ function ai_seo_advisor_analyze_form_submit($form, &$form_state) {
   // Reasoning models (o1, o3, gpt-5-nano, etc.) burn tokens on internal thinking
   // before producing output, so they need a much larger budget than standard models.
   $model_bare = (strpos($ai_model, '/') !== FALSE) ? explode('/', $ai_model, 2)[1] : $ai_model;
-  $is_reasoning_model = (bool) preg_match('/^(o1|o3|o4|gpt-5]/i', $model_bare);
+  $is_reasoning_model = (bool) preg_match('/^(o1|o3|o4|gpt-5)/i', $model_bare);
   $ai_max_tokens = $is_reasoning_model ? 16000 : 3000;
 
   // Build preview HTML from the saved node.
@@ -342,7 +346,7 @@ function ai_seo_advisor_report_delete_form($form, &$form_state, $node, $report) 
   return confirm_form(
     $form,
     t('Are you sure you want to delete this SEO report?'),
-    'node/' . $node->nid . '/seo',
+    'node/' . $node->nid . '/ai-seo',
     t('Created on @date. This action cannot be undone.', ['@date' => format_date($report->created)]),
     t('Delete'),
     t('Cancel')
@@ -356,11 +360,16 @@ function ai_seo_advisor_report_delete_form_submit($form, &$form_state) {
   $report_id = $form_state['values']['report_id'];
   $node = $form_state['values']['node'];
 
+  if (!module_exists('entity_plus')) {
+    backdrop_set_message(t('The entity_plus module is required to delete SEO reports.'), 'error');
+    $form_state['redirect'] = 'node/' . $node->nid . '/ai-seo';
+    return;
+  }
   $report = entity_load('ai_seo_report', $report_id);
   if ($report) {
     $report->delete();
     backdrop_set_message(t('SEO report deleted.'));
   }
 
-  $form_state['redirect'] = 'node/' . $node->nid . '/seo';
+  $form_state['redirect'] = 'node/' . $node->nid . '/ai-seo';
 }

@@ -57,7 +57,7 @@ function ai_seo_advisor_settings_form($form, &$form_state) {
 
   $form['options']['system_prompt'] = [
     '#type' => 'textarea',
-    '#title' => t('Custom system prompt (optional]'),
+    '#title' => t('Custom system prompt (optional)'),
     '#default_value' => isset($opts_cfg['system_prompt']) ? $opts_cfg['system_prompt'] : '',
     '#description' => t('Override the default system prompt. Leave empty to use the default. This defines how the AI should behave and respond.'),
     '#rows' => 6,
@@ -86,12 +86,12 @@ function ai_seo_advisor_settings_form($form, &$form_state) {
 
   $form['options']['report_type_info'] = [
     '#type' => 'markup',
-    '#markup' => '<div class="messages info">' . t('Report type prompts are configured at <a href="@link">Report Types</a>. Each report type has its own detailed analysis prompt.', ['@link' => url('admin/config/ai/seo/report-types')]) . '</div>',
+    '#markup' => '<div class="messages info">' . t('Report type prompts are configured at <a href="@link">Report Types</a>. Each report type has its own detailed analysis prompt.', ['@link' => url('admin/config/ai/ai-seo/report-types')]) . '</div>',
   ];
 
   $form['options']['log_ai_input'] = [
     '#type' => 'checkbox',
-    '#title' => t('Log AI input (debug]'),
+    '#title' => t('Log AI input (debug)'),
     '#default_value' => (is_array(config_get('ai_seo_advisor.settings', 'options')) && !empty(config_get('ai_seo_advisor.settings', 'options')['log_ai_input'])) ? 1 : 0,
     '#description' => t('Log sanitized content sent to AI for debugging. Use only on development sites.'),
   ];
@@ -184,9 +184,9 @@ function ai_seo_advisor_report_types_list() {
     $status = !empty($type['status']) ? t('Enabled') : t('Disabled');
 
     $operations = [];
-    $operations[] = l(t('Edit'), 'admin/config/ai/seo/report-types/' . $name . '/edit');
-    if (!in_array($name, ['seo_analysis', 'aeo_analysis'])) {
-      $operations[] = l(t('Delete'), 'admin/config/ai/seo/report-types/' . $name . '/delete');
+    $operations[] = l(t('Edit'), 'admin/config/ai/ai-seo/report-types/' . $name . '/edit');
+    if (!in_array($name, ['full', 'aeo', 'seo_analysis'])) {
+      $operations[] = l(t('Delete'), 'admin/config/ai/ai-seo/report-types/' . $name . '/delete');
     }
 
     $rows[] = [
@@ -220,7 +220,7 @@ function ai_seo_advisor_report_type_form($form, &$form_state, $name = NULL) {
 
     if (empty($report_type) || empty($report_type['name'])) {
       backdrop_set_message(t('Report type not found.'), 'error');
-      backdrop_goto('admin/config/ai/seo/report-types');
+      backdrop_goto('admin/config/ai/ai-seo/report-types');
     }
   }
   else {
@@ -288,7 +288,7 @@ function ai_seo_advisor_report_type_form($form, &$form_state, $name = NULL) {
   $form['actions']['cancel'] = [
     '#type' => 'link',
     '#title' => t('Cancel'),
-    '#href' => 'admin/config/ai/seo/report-types',
+    '#href' => 'admin/config/ai/ai-seo/report-types',
   ];
 
   return $form;
@@ -309,10 +309,11 @@ function ai_seo_advisor_report_type_form_submit($form, &$form_state) {
   $config->set('description', $form_state['values']['description']);
   $config->set('prompt', $form_state['values']['prompt']);
   $config->set('status', !empty($form_state['values']['status']) ? 1 : 0);
+  $config->set('weight', isset($form_state['values']['weight']) ? (int) $form_state['values']['weight'] : 0);
   $config->save();
 
   backdrop_set_message(t('Report type saved.'));
-  $form_state['redirect'] = 'admin/config/ai/seo/report-types';
+  $form_state['redirect'] = 'admin/config/ai/ai-seo/report-types';
 }
 
 /**
@@ -320,9 +321,9 @@ function ai_seo_advisor_report_type_form_submit($form, &$form_state) {
  */
 function ai_seo_advisor_report_type_delete_form($form, &$form_state, $name) {
   // Don't allow deleting default types.
-  if (in_array($name, ['seo_analysis', 'aeo_analysis'])) {
+  if (in_array($name, ['full', 'aeo', 'seo_analysis'])) {
     backdrop_set_message(t('Cannot delete default report types.'), 'error');
-    backdrop_goto('admin/config/ai/seo/report-types');
+    backdrop_goto('admin/config/ai/ai-seo/report-types');
   }
 
   // Load from individual config file
@@ -331,7 +332,7 @@ function ai_seo_advisor_report_type_delete_form($form, &$form_state, $name) {
 
   if (empty($report_type) || empty($report_type['name'])) {
     backdrop_set_message(t('Report type not found.'), 'error');
-    backdrop_goto('admin/config/ai/seo/report-types');
+    backdrop_goto('admin/config/ai/ai-seo/report-types');
   }
 
   $form['name'] = [
@@ -342,7 +343,7 @@ function ai_seo_advisor_report_type_delete_form($form, &$form_state, $name) {
   return confirm_form(
     $form,
     t('Are you sure you want to delete the report type %label?', ['%label' => $report_type['label']]),
-    'admin/config/ai/seo/report-types',
+    'admin/config/ai/ai-seo/report-types',
     t('This action cannot be undone.'),
     t('Delete'),
     t('Cancel')
@@ -360,5 +361,5 @@ function ai_seo_advisor_report_type_delete_form_submit($form, &$form_state) {
   $config->delete();
 
   backdrop_set_message(t('Report type deleted.'));
-  $form_state['redirect'] = 'admin/config/ai/seo/report-types';
+  $form_state['redirect'] = 'admin/config/ai/ai-seo/report-types';
 }
