@@ -4,4 +4,5 @@ backdrop = 1.x
 type = module
 package = AI
 dependencies[] = ai
+dependencies[] = entity_plus
 configure = admin/config/ai/ai-seo

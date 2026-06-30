@@ -193,7 +193,8 @@ function ai_seo_advisor_tool_get_seo_report(array $args) {
       ->fetchObject();
 
     if ($existing) {
-      $data = !empty($existing->report_data) ? unserialize($existing->report_data) : [];
+      $data = !empty($existing->report_data) ? unserialize($existing->report_data, ['allowed_classes' => FALSE]) : [];
+      $data = is_array($data) ? $data : [];
       return _ai_seo_advisor_tool_format_report($node, $existing, $data, TRUE);
     }
   }
@@ -204,7 +205,8 @@ function ai_seo_advisor_tool_get_seo_report(array $args) {
     return ['error' => 'SEO Advisor analysis function not available.'];
   }
 
-  // Build a minimal form_state to trigger analysis.
+  // Build a minimal form + form_state to trigger analysis. The submit handler
+  // reads the node from $form['#node'], so it must be set here.
   $form_state = [
     'values' => [
       'report_type' => $report_type,
@@ -212,7 +214,7 @@ function ai_seo_advisor_tool_get_seo_report(array $args) {
     ],
     'build_info' => ['args' => [$node]],
   ];
-  $form = [];
+  $form = ['#node' => $node];
   ai_seo_advisor_analyze_form_submit($form, $form_state);
 
   // Re-fetch the report that was just saved.
@@ -227,7 +229,8 @@ function ai_seo_advisor_tool_get_seo_report(array $args) {
     ->fetchObject();
 
   if ($saved) {
-    $data = !empty($saved->report_data) ? unserialize($saved->report_data) : [];
+    $data = !empty($saved->report_data) ? unserialize($saved->report_data, ['allowed_classes' => FALSE]) : [];
+    $data = is_array($data) ? $data : [];
     return _ai_seo_advisor_tool_format_report($node, $saved, $data, FALSE);
   }
 
@@ -325,7 +328,6 @@ function ai_seo_advisor_tool_get_bulk_seo_report(array $args) {
 
   $nodes = [];
   foreach ($rows as $row) {
-    $data = !empty($row->report_data) ? unserialize($row->report_data) : [];
     $nodes[] = [
       'nid' => (int) $row->nid,
       'title' => $row->title,

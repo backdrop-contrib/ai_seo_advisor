@@ -127,7 +127,7 @@ class AiSEOReport extends Entity {
    */
   public function uri() {
     return [
-      'path' => 'node/' . $this->entity_id . '/seo/' . $this->report_id,
+      'path' => 'node/' . $this->entity_id . '/ai-seo/' . $this->report_id . '/view',
     ];
   }
 
@@ -151,10 +151,10 @@ class AiSEOReport extends Entity {
   }
 
   /**
-   * Returns the report URL (deprecated, use uri()].
+   * Returns the report URL (deprecated, use uri()).
    */
   public function url() {
-    return 'node/' . $this->entity_id . '/seo/' . $this->report_id;
+    return 'node/' . $this->entity_id . '/ai-seo/' . $this->report_id . '/view';
   }
 
   /**
@@ -202,7 +202,8 @@ class AiSEOReportController extends EntityPlusController {
   public function buildContent(EntityInterface $entity, $view_mode = 'full', $langcode = NULL, $content = []) {
     $build = parent::buildContent($entity, $view_mode, $langcode, $content);
 
-    // Render the report.
+    // Render the report. The render function lives in a lazy-loaded include.
+    ai_seo_advisor_include_reports();
     $build['report'] = ai_seo_advisor_render_results($entity->report_data);
     $build['report']['#weight'] = 0;
 

@@ -32,11 +32,11 @@ function ai_seo_advisor_render_results(array $result) {
     $formatted = '';
 
     // First, replace any H1 tags with H2 (H1 is reserved for page title)
-    $report_html = preg_replace('/<h1([^>]*]>/', '<h2$1>', $report_html);
+    $report_html = preg_replace('/<h1([^>]*)>/', '<h2$1>', $report_html);
     $report_html = preg_replace('/<\/h1>/', '</h2>', $report_html);
 
     // Split content by H2 tags that start with numbers (the main sections)
-    $parts = preg_split('/(<h2[^>]*>\s*\d+\..*?<\/h2>]/s', $report_html, -1, PREG_SPLIT_DELIM_CAPTURE);
+    $parts = preg_split('/(<h2[^>]*>\s*\d+\..*?<\/h2>)/s', $report_html, -1, PREG_SPLIT_DELIM_CAPTURE);
 
     $in_section = FALSE;
     $section_content = '';
@@ -46,7 +46,7 @@ function ai_seo_advisor_render_results(array $result) {
       if (empty($part)) continue;
 
       // Check if this is a numbered H2 heading
-      if (preg_match('/^<h2[^>]*>(\s*\d+\..*?]<\/h2>$/s', $part, $matches)) {
+      if (preg_match('/^<h2[^>]*>(\s*\d+\..*?)<\/h2>$/s', $part, $matches)) {
         // Close previous section if open
         if ($in_section && !empty($section_content)) {
           $formatted .= '</div></details>' . "\n";
@@ -76,6 +76,16 @@ function ai_seo_advisor_render_results(array $result) {
     if ($in_section) {
       $formatted .= '</div></details>' . "\n";
     }
+
+    // The report originates from an LLM (whose input includes site content),
+    // and the template prints it unescaped — sanitize before display so a
+    // prompt-injected <script> or event handler can never reach the admin.
+    $formatted = filter_xss($formatted, [
+      'a', 'abbr', 'b', 'blockquote', 'br', 'code', 'dd', 'details', 'div',
+      'dl', 'dt', 'em', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'i', 'li', 'ol',
+      'p', 'pre', 'section', 'span', 'strong', 'summary', 'table', 'tbody',
+      'td', 'th', 'thead', 'tr', 'ul',
+    ]);
 
     // Use theme function for output
     $build['ai_report'] = [
@@ -131,10 +141,10 @@ function ai_seo_advisor_normalize_ai_report_html($report) {
   $report = preg_replace('/^```[a-zA-Z0-9_-]*\s*$/m', '', $report);
   $report = preg_replace('/^\s*```\s*$/m', '', $report);
 
-  $has_html = (bool) preg_match('/<(h[1-6]|p|ul|ol|li|details|summary|pre|table|div|section|article|br]\b/i', $report);
+  $has_html = (bool) preg_match('/<(h[1-6]|p|ul|ol|li|details|summary|pre|table|div|section|article|br)\b/i', $report);
   $has_markdown = (strpos($report, '**') !== FALSE)
-    || (bool) preg_match('/(^|\s][*+-]\s+\S/', $report)
-    || (bool) preg_match('/(^|\s]\d+[.]]\s+\S/', $report);
+    || (bool) preg_match('/(^|\s)[*+-]\s+\S/', $report)
+    || (bool) preg_match('/(^|\s)\d+[.)]\s+\S/', $report);
 
   // If it's already HTML and doesn't look markdown-ish, keep it.
   if ($has_html && !$has_markdown) {
@@ -153,21 +163,21 @@ function ai_seo_advisor_normalize_ai_report_html($report) {
 
   // Heuristic: break dense markdown-ish single-line output into lines.
   if (substr_count($report, "\n") < 3 && substr_count($report, '**') > 4) {
-    $report = preg_replace('/\s+(?=\*\*[^*]{2,80}\*\*]/', "\n", $report);
-    $report = preg_replace('/\s+(?=\d+[.]]\s+]/', "\n", $report);
-    $report = preg_replace('/\s+(?=\*\s+]/', "\n", $report);
-    $report = preg_replace('/\s+(?=[-+]\s+]/', "\n", $report);
+    $report = preg_replace('/\s+(?=\*\*[^*]{2,80}\*\*)/', "\n", $report);
+    $report = preg_replace('/\s+(?=\d+[.)]\s+)/', "\n", $report);
+    $report = preg_replace('/\s+(?=\*\s+)/', "\n", $report);
+    $report = preg_replace('/\s+(?=[-+]\s+)/', "\n", $report);
   }
 
   // Additional splitting for compact outputs that mix headings/lists inline.
-  $report = preg_replace('/\.\s+(?=\*\*[^*]{2,120}\*\*:]/', ".\n", $report);
-  $report = preg_replace('/\s+(?=\*\*[^*]{2,120}\*\*:]/', "\n", $report);
-  $report = preg_replace('/\s+(?=\d+[.]]\s+]/', "\n", $report);
-  $report = preg_replace('/\s+(?=[*+-]\s+]/', "\n", $report);
+  $report = preg_replace('/\.\s+(?=\*\*[^*]{2,120}\*\*:)/', ".\n", $report);
+  $report = preg_replace('/\s+(?=\*\*[^*]{2,120}\*\*:)/', "\n", $report);
+  $report = preg_replace('/\s+(?=\d+[.)]\s+)/', "\n", $report);
+  $report = preg_replace('/\s+(?=[*+-]\s+)/', "\n", $report);
 
-  // Normalize "1]" list markers to "1." for simpler parsing.
-  $report = preg_replace('/^(\d+]\]\s+/m', '$1. ', $report);
-  $report = preg_replace('/\n(\d+]\]\s+/', "\n$1. ", $report);
+  // Normalize "1)" list markers to "1." for simpler parsing.
+  $report = preg_replace('/^(\d+)\)\s+/m', '$1. ', $report);
+  $report = preg_replace('/\n(\d+)\)\s+/', "\n$1. ", $report);
 
   // Ensure obvious section separators become newlines.
   if (substr_count($report, "\n") < 2) {
@@ -188,9 +198,9 @@ function ai_seo_advisor_normalize_ai_report_html($report) {
 
   $inline = function($text) {
     $text = check_plain(trim((string) $text));
-    $text = preg_replace('/\*\*(.+?]\*\*/', '<strong>$1</strong>', $text);
-    $text = preg_replace('/\*(.+?]\*/', '<em>$1</em>', $text);
-    $text = preg_replace('/`(.+?]`/', '<code>$1</code>', $text);
+    $text = preg_replace('/\*\*(.+?)\*\*/', '<strong>$1</strong>', $text);
+    $text = preg_replace('/\*(.+?)\*/', '<em>$1</em>', $text);
+    $text = preg_replace('/`(.+?)`/', '<code>$1</code>', $text);
     return $text;
   };
 
@@ -227,26 +237,26 @@ function ai_seo_advisor_normalize_ai_report_html($report) {
       continue;
     }
 
-    if (preg_match('/^###\s+(.+]$/', $line, $m)) {
+    if (preg_match('/^###\s+(.+)$/', $line, $m)) {
       $flush_para();
       $flush_list();
       $out .= '<h4>' . $inline($m[1]) . '</h4>' . "\n";
       continue;
     }
-    if (preg_match('/^##\s+(.+]$/', $line, $m)) {
+    if (preg_match('/^##\s+(.+)$/', $line, $m)) {
       $flush_para();
       $flush_list();
       $out .= '<h3>' . $inline($m[1]) . '</h3>' . "\n";
       continue;
     }
-    if (preg_match('/^#\s+(.+]$/', $line, $m)) {
+    if (preg_match('/^#\s+(.+)$/', $line, $m)) {
       $flush_para();
       $flush_list();
       $out .= '<h2>' . $inline($m[1]) . '</h2>' . "\n";
       continue;
     }
 
-    if (preg_match('/^[-*+]\s+(.+]$/', $line, $m)) {
+    if (preg_match('/^[-*+]\s+(.+)$/', $line, $m)) {
       $flush_para();
       if ($list_type !== 'ul') {
         $flush_list();
@@ -257,7 +267,7 @@ function ai_seo_advisor_normalize_ai_report_html($report) {
       continue;
     }
 
-    if (preg_match('/^\d+\.\s+(.+]$/', $line, $m)) {
+    if (preg_match('/^\d+\.\s+(.+)$/', $line, $m)) {
       $flush_para();
       if ($list_type !== 'ol') {
         $flush_list();
@@ -269,7 +279,7 @@ function ai_seo_advisor_normalize_ai_report_html($report) {
     }
 
     // Treat "**Heading:** trailing text" as heading + paragraph.
-    if (preg_match('/^\*\*([^*]{2,120}]\*\*:\s*(.+]$/', $line, $m)) {
+    if (preg_match('/^\*\*([^*]{2,120})\*\*:\s*(.+)$/', $line, $m)) {
       $flush_para();
       $flush_list();
       $out .= '<h3>' . $inline($m[1]) . '</h3>' . "\n";
@@ -278,7 +288,7 @@ function ai_seo_advisor_normalize_ai_report_html($report) {
     }
 
     // Treat bold labels as subheadings when they look like section headings.
-    if (preg_match('/^\*\*([^*]{2,120}]\*\*:?\s*$/', $line, $m)) {
+    if (preg_match('/^\*\*([^*]{2,120})\*\*:?\s*$/', $line, $m)) {
       $flush_para();
       $flush_list();
       $out .= '<h3>' . $inline($m[1]) . '</h3>' . "\n";
@@ -343,7 +353,7 @@ function ai_seo_advisor_analyze($title, $html_or_text, $meta_description, $focus
     $min = isset($th['title_min']) ? (int) $th['title_min'] : 10;
     $max = isset($th['title_max']) ? (int) $th['title_max'] : 60;
     $pass = ($len >= $min && $len <= $max);
-    $add_check('title_length', $pass, t('Title length: @len chars (recommended @min–@max].', ['@len' => $len, '@min' => $min, '@max' => $max]));
+    $add_check('title_length', $pass, t('Title length: @len chars (recommended @min–@max).', ['@len' => $len, '@min' => $min, '@max' => $max]));
   }
 
   // Meta description.
@@ -352,7 +362,7 @@ function ai_seo_advisor_analyze($title, $html_or_text, $meta_description, $focus
     $dmax = isset($th['description_max']) ? (int) $th['description_max'] : 160;
     $dlen = backdrop_strlen($desc);
     $pass = ($dlen >= $dmin && $dlen <= $dmax);
-    $add_check('description_length', $pass, t('Meta description length: @len chars (recommended @min–@max].', ['@len' => $dlen, '@min' => $dmin, '@max' => $dmax]));
+    $add_check('description_length', $pass, t('Meta description length: @len chars (recommended @min–@max).', ['@len' => $dlen, '@min' => $dmin, '@max' => $dmax]));
   }
 
   // Word count.
@@ -361,16 +371,16 @@ function ai_seo_advisor_analyze($title, $html_or_text, $meta_description, $focus
     $count = is_array($words) ? count($words) : 0;
     $min_wc = isset($th['min_word_count']) ? (int) $th['min_word_count'] : 300;
     $pass = $count >= $min_wc;
-    $add_check('word_count', $pass, t('Word count: @count (minimum @min].', ['@count' => $count, '@min' => $min_wc]));
+    $add_check('word_count', $pass, t('Word count: @count (minimum @min).', ['@count' => $count, '@min' => $min_wc]));
   }
 
   // Headings (H1/H2) counts based on HTML.
   if (!empty($ck['headings'])) {
     $text = $html_or_text; // allow regex on HTML.
-    $h1s = preg_match_all('/<h1\b[^>]*>(.*?]<\/h1>/i', $text, $m1);
-    $h2s = preg_match_all('/<h2\b[^>]*>(.*?]<\/h2>/i', $text, $m2);
+    $h1s = preg_match_all('/<h1\b[^>]*>(.*?)<\/h1>/i', $text, $m1);
+    $h2s = preg_match_all('/<h2\b[^>]*>(.*?)<\/h2>/i', $text, $m2);
     $pass = ($h1s === 1 && $h2s >= 1);
-    $add_check('headings', $pass, t('Headings: @h1 H1 and @h2 H2 found (recommend exactly one H1 and at least one H2].', ['@h1' => (int) $h1s, '@h2' => (int) $h2s]));
+    $add_check('headings', $pass, t('Headings: @h1 H1 and @h2 H2 found (recommend exactly one H1 and at least one H2).', ['@h1' => (int) $h1s, '@h2' => (int) $h2s]));
   }
 
   // Internal links (count anchors that are relative OR absolute to this host).
@@ -425,7 +435,7 @@ function ai_seo_advisor_analyze($title, $html_or_text, $meta_description, $focus
 
     // Regex fallback if DOM fails.
     if (!$counted) {
-      if (preg_match_all('/<a\b[^>]*href\s*=\s*"([^"]+]"/i', $html, $m)) {
+      if (preg_match_all('/<a\b[^>]*href\s*=\s*"([^"]+)"/i', $html, $m)) {
         foreach ($m[1] as $href) {
           $href = trim($href);
           if ($href === '') { continue; }
@@ -447,7 +457,7 @@ function ai_seo_advisor_analyze($title, $html_or_text, $meta_description, $focus
     }
 
     $pass = ($internal >= 1);
-    $add_check('internal_links', $pass, t('Internal links: @n found (at least 1 recommended].', ['@n' => (int) $internal]));
+    $add_check('internal_links', $pass, t('Internal links: @n found (at least 1 recommended).', ['@n' => (int) $internal]));
   }
 
   // Image alt attributes (preview HTML parsing).
@@ -479,7 +489,7 @@ function ai_seo_advisor_analyze($title, $html_or_text, $meta_description, $focus
     if (preg_match_all('/<img\b[^>]*>/i', $html, $m)) {
       $img_count_rx = count($m[0]);
       foreach ($m[0] as $tag) {
-        if (!preg_match('/\balt\s*=\s*("[^"]*"|\'[^\']*\']/i', $tag)) {
+        if (!preg_match('/\balt\s*=\s*("[^"]*"|\'[^\']*\')/i', $tag)) {
           $missing_alt_rx++;
         }
         else {
@@ -504,7 +514,7 @@ function ai_seo_advisor_analyze($title, $html_or_text, $meta_description, $focus
       $add_check('images_alt', $pass, $msg);
     }
     else {
-      $add_check('images_alt', TRUE, t('No images found in preview HTML (alt text not required].'));
+      $add_check('images_alt', TRUE, t('No images found in preview HTML (alt text not required).'));
     }
   }
 
@@ -559,7 +569,7 @@ function ai_seo_advisor_generate_ai_suggestions($title, $html_text, $raw_text, $
   }
   else {
     // Fallback if report type not found or has no prompt.
-    $report_type_prompt = 'Provide concise improvement tips and up to 5 prioritized action recommendations (each <=28 words]. Also return 3 title ideas (<=60 chars], 3 meta description ideas (140-160 chars], and 8 keyword suggestions. JSON keys: tips[], recommendations[], title_ideas[], description_ideas[], keywords[]';
+    $report_type_prompt = 'Provide concise improvement tips and up to 5 prioritized action recommendations (each <=28 words). Also return 3 title ideas (<=60 chars), 3 meta description ideas (140-160 chars), and 8 keyword suggestions. JSON keys: tips[], recommendations[], title_ideas[], description_ideas[], keywords[]';
   }
 
   // Build full system prompt: system_prompt + site_context.
