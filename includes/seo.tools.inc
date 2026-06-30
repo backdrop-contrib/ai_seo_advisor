@@ -321,7 +321,7 @@ function ai_seo_advisor_tool_get_bulk_seo_report(array $args) {
 
   // Join with report table for analyzed nodes.
   $query->join('ai_seo_report', 'r', 'r.entity_id = n.nid AND r.entity_type = :et', [':et' => 'node']);
-  $query->fields('r', ['report_type', 'changed', 'report_data']);
+  $query->fields('r', ['report_type', 'changed']);
   $query->orderBy('r.changed', 'DESC');
   $query->range(0, $limit);
   $rows = $query->execute()->fetchAll();
