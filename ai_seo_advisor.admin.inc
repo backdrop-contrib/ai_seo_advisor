@@ -185,7 +185,7 @@ function ai_seo_advisor_report_types_list() {
 
     $operations = [];
     $operations[] = l(t('Edit'), 'admin/config/ai/ai-seo/report-types/' . $name . '/edit');
-    if (!in_array($name, ['full', 'aeo'])) {
+    if (!in_array($name, ['full', 'aeo', 'seo_analysis'])) {
       $operations[] = l(t('Delete'), 'admin/config/ai/ai-seo/report-types/' . $name . '/delete');
     }
 
