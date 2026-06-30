@@ -125,8 +125,26 @@ function ai_seo_advisor_install() {
  * Implements hook_requirements().
  */
 function ai_seo_advisor_requirements($phase) {
-  if (!module_load_install('ai_upgrade')) { return []; }
-  return ai_upgrade_module_requirements($phase, 'ai_seo_advisor');
+  $requirements = [];
+
+  // Verify entity_plus is enabled at runtime so existing sites upgrading
+  // cannot reach AiSEOReportController (which extends EntityPlusController)
+  // without the dependency present.
+  if ($phase === 'runtime') {
+    if (!module_exists('entity_plus')) {
+      $requirements['ai_seo_advisor_entity_plus'] = [
+        'title' => t('AI SEO Advisor'),
+        'value' => t('entity_plus module is missing'),
+        'description' => t('The AI SEO Advisor module requires the entity_plus module to be enabled. Enable entity_plus before using this module.'),
+        'severity' => REQUIREMENT_ERROR,
+      ];
+    }
+  }
+
+  if (!module_load_install('ai_upgrade')) {
+    return $requirements;
+  }
+  return $requirements + ai_upgrade_module_requirements($phase, 'ai_seo_advisor');
 }
 
 /**
@@ -158,12 +176,37 @@ function ai_seo_advisor_update_1001() {
  * Restore columns dropped by the old update 1001 where missing.
  */
 function ai_seo_advisor_update_1003() {
-  $schema = ai_seo_advisor_schema();
+  // Field specs are frozen at this update's version. Do not read from
+  // ai_seo_advisor_schema() — later schema changes must not alter this
+  // historical migration.
+  $fields = [
+    'focus_keyword' => [
+      'type' => 'varchar',
+      'length' => 255,
+      'not null' => FALSE,
+      'description' => 'The focus keyword used for analysis.',
+    ],
+    'score' => [
+      'type' => 'int',
+      'not null' => TRUE,
+      'default' => 0,
+      'description' => 'The overall SEO score (0-100).',
+    ],
+    'status' => [
+      'type' => 'varchar',
+      'length' => 16,
+      'not null' => TRUE,
+      'default' => 'RED',
+      'description' => 'The status: GREEN, AMBER, or RED.',
+    ],
+  ];
   $restored = [];
-  foreach (['focus_keyword', 'score', 'status'] as $field) {
-    if (db_table_exists('ai_seo_report') && !db_field_exists('ai_seo_report', $field)) {
-      db_add_field('ai_seo_report', $field, $schema['ai_seo_report']['fields'][$field]);
-      $restored[] = $field;
+  if (db_table_exists('ai_seo_report')) {
+    foreach ($fields as $field => $spec) {
+      if (!db_field_exists('ai_seo_report', $field)) {
+        db_add_field('ai_seo_report', $field, $spec);
+        $restored[] = $field;
+      }
     }
   }
   return $restored

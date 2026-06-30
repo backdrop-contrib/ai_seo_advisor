@@ -435,7 +435,7 @@ function ai_seo_advisor_analyze($title, $html_or_text, $meta_description, $focus
 
     // Regex fallback if DOM fails.
     if (!$counted) {
-      if (preg_match_all('/<a\b[^>]*href\s*=\s*"([^"]+)"/i', $html, $m)) {
+      if (preg_match_all('/<a\b[^>]*href\s*=\s*["\']([^"\']+)["\']/i', $html, $m)) {
         foreach ($m[1] as $href) {
           $href = trim($href);
           if ($href === '') { continue; }
