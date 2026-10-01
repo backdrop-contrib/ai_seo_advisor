@@ -148,16 +148,14 @@ function ai_seo_advisor_requirements($phase) {
 }
 
 /**
- * Rename openai_seo_report table to ai_seo_report.
+ * Move legacy openai_seo_report rows into ai_seo_report.
  */
 function ai_seo_advisor_update_1002() {
-  if (db_table_exists('openai_seo_report') && !db_table_exists('ai_seo_report')) {
-    db_rename_table('openai_seo_report', 'ai_seo_report');
+  if (!module_load_install('ai_upgrade')) {
+    return t('AI Upgrade helpers unavailable; legacy SEO reports not migrated.');
   }
-  elseif (db_table_exists('openai_seo_report')) {
-    db_drop_table('openai_seo_report');
-  }
-  return t('Renamed openai_seo_report to ai_seo_report.');
+  $result = ai_upgrade_migrate_table('openai_seo_report', 'ai_seo_report', ['report_id'], !module_exists('openai_seo_advisor'));
+  return t('Legacy SEO reports: !summary.', ['!summary' => ai_upgrade_table_results_summary([$result])]);
 }
 
 /**

@@ -353,3 +353,71 @@ function ai_seo_advisor_include_reports() {
     $loaded = TRUE;
   }
 }
+
+/**
+ * Implements hook_ai_async_callbacks().
+ */
+function ai_seo_advisor_ai_async_callbacks() {
+  return [
+    'ai_seo_advisor_async_generate_report' => t('Generate an AI SEO report in the background.'),
+  ];
+}
+
+/**
+ * Background worker callback for ai_async.
+ *
+ * @param array $data
+ *   Job data containing report_id, node_nid, and generation parameters.
+ *
+ * @return array
+ *   Result containing report_id, status, and rendered HTML report.
+ */
+function ai_seo_advisor_async_generate_report(array $data) {
+  ai_seo_advisor_include_reports();
+  $report_id = !empty($data['report_id']) ? (int) $data['report_id'] : 0;
+  $report = entity_load('ai_seo_report', $report_id);
+  if (!$report) {
+    throw new Exception(t('SEO report #@id not found.', ['@id' => $report_id]));
+  }
+
+  $title = !empty($data['title']) ? $data['title'] : $report->title;
+  $html_text = isset($data['html_text']) ? $data['html_text'] : '';
+  $raw_text = isset($data['raw_text']) ? $data['raw_text'] : '';
+  $meta_description = isset($data['meta_description']) ? $data['meta_description'] : '';
+  $focus = isset($data['focus']) ? $data['focus'] : '';
+  $model = isset($data['model']) ? $data['model'] : '';
+  $max_tokens = !empty($data['max_tokens']) ? (int) $data['max_tokens'] : 0;
+  $report_type = !empty($data['report_type']) ? $data['report_type'] : $report->report_type;
+
+  $ai = ai_seo_advisor_generate_ai_suggestions(
+    $title,
+    $html_text,
+    $raw_text,
+    $meta_description,
+    $focus,
+    $model,
+    $max_tokens,
+    $report_type
+  );
+
+  if (is_array($ai)) {
+    $report_data = is_array($report->report_data) ? $report->report_data : [];
+    $report_data['ai'] = $ai;
+    $report->report_data = $report_data;
+    $report->save();
+  }
+  else {
+    throw new Exception(t('AI engine returned no suggestions or encountered an error.'));
+  }
+
+  // Pre-render the HTML accordion report for client-side injection.
+  $build = ai_seo_advisor_render_results($report->report_data);
+  $rendered = backdrop_render($build);
+
+  return [
+    'report_id' => $report->report_id,
+    'node_nid' => (int) $data['node_nid'],
+    'rendered_html' => $rendered,
+    'view_url' => url('node/' . (int) $data['node_nid'] . '/ai-seo/' . $report->report_id . '/view'),
+  ];
+}
