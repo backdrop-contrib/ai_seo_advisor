@@ -188,8 +188,44 @@ function ai_seo_advisor_analyze_form($form, &$form_state, $node) {
     '#attributes' => ['id' => $wrapper_id],
   ];
 
+  // If we have an async job in flight, display progress and attach JS polling.
+  if (isset($form_state['async_job'])) {
+    $async = $form_state['async_job'];
+    $job_id = $async['job_id'];
+    $report_id = $async['report_id'];
+    $nid = $async['nid'];
+
+    $form['results'] = [
+      '#type' => 'container',
+      '#attributes' => [
+        'id' => $wrapper_id,
+        'class' => ['ai-seo-async-container'],
+        'data-ai-async-job-id' => $job_id,
+        'data-ai-async-report-id' => $report_id,
+        'data-ai-async-nid' => $nid,
+      ],
+      'status_box' => [
+        '#markup' => '<div class="messages status ai-seo-async-status">' .
+          '<strong>' . t('Generating AI SEO Report in the background…') . '</strong>' .
+          '<p>' . t('Your report (#@id) is being analyzed. This section will automatically update with the full report once complete.', ['@id' => $report_id]) . '</p>' .
+          '<div class="ai-seo-throbber" style="margin-top:10px;"><span class="ajax-progress ajax-progress-throbber"><span class="throbber">&nbsp;</span><span class="message">' . t('Analyzing content…') . '</span></span></div>' .
+          '</div>',
+      ],
+      '#attached' => [
+        'library' => [
+          ['system', 'jquery.once'],
+        ],
+        'js' => [
+          backdrop_get_path('module', 'ai_async') . '/js/ai_async.js',
+          backdrop_get_path('module', 'ai_seo_advisor') . '/js/ai_seo_advisor_async.js',
+        ],
+      ],
+      '#prefix' => '<div id="' . check_plain($wrapper_id) . '">',
+      '#suffix' => '</div>',
+    ];
+  }
   // If we have results from a previous submission, display them.
-  if (isset($form_state['seo_result'])) {
+  elseif (isset($form_state['seo_result'])) {
     ai_seo_advisor_include_reports();
     $form['results'] = ai_seo_advisor_render_results($form_state['seo_result']);
     $form['results']['#prefix'] = '<div id="' . check_plain($wrapper_id) . '">';
@@ -221,9 +257,12 @@ function ai_seo_advisor_analyze_form_submit($form, &$form_state) {
   $opts = config_get('ai_seo_advisor.settings', 'options');
   $opts = is_array($opts) ? $opts : [];
   $ai_model = !empty($opts['ai_model']) ? $opts['ai_model'] : (config_get('ai.settings', 'default_text_model'));
+  if (empty($ai_model) && function_exists('ai_default_model') && function_exists('ai_get_all_chat_models')) {
+    $ai_model = ai_default_model(ai_get_all_chat_models());
+  }
   // Reasoning models (o1, o3, gpt-5-nano, etc.) burn tokens on internal thinking
   // before producing output, so they need a much larger budget than standard models.
-  $model_bare = (strpos($ai_model, '/') !== FALSE) ? explode('/', $ai_model, 2)[1] : $ai_model;
+  $model_bare = (!empty($ai_model) && strpos($ai_model, '/') !== FALSE) ? explode('/', $ai_model, 2)[1] : (string) $ai_model;
   $is_reasoning_model = (bool) preg_match('/^(o1|o3|o4|gpt-5)/i', $model_bare);
   $ai_max_tokens = $is_reasoning_model ? 16000 : 3000;
 
@@ -290,10 +329,54 @@ function ai_seo_advisor_analyze_form_submit($form, &$form_state) {
     'view_mode' => 'full',
   ]);
 
-  // Generate AI report.
+  $ai_source_html = $used_preview ? $text : $raw_text;
+
+  // Offload to ai_async if available to avoid web request timeouts.
+  if (module_exists('ai_async') && function_exists('ai_async_submit')) {
+    try {
+      $report = entity_create('ai_seo_report', [
+        'entity_type' => 'node',
+        'entity_id' => $node->nid,
+        'report_type' => $report_type,
+        'title' => $title,
+        'score' => isset($result['score']) ? (int) $result['score'] : 0,
+        'status' => isset($result['status']) ? $result['status'] : 'RED',
+        'report_data' => $result,
+        'html_snapshot' => $html,
+      ]);
+      $report->save();
+
+      $job_id = ai_async_submit('ai_seo_advisor_async_generate_report', [
+        'report_id' => (int) $report->report_id,
+        'node_nid' => (int) $node->nid,
+        'title' => $title,
+        'html_text' => $ai_source_html,
+        'raw_text' => $raw_text,
+        'meta_description' => $meta_description,
+        'focus' => '',
+        'model' => $ai_model,
+        'max_tokens' => $ai_max_tokens,
+        'report_type' => $report_type,
+      ]);
+
+      if ($job_id) {
+        $form_state['async_job'] = [
+          'job_id' => $job_id,
+          'report_id' => $report->report_id,
+          'nid' => $node->nid,
+        ];
+        $form_state['rebuild'] = TRUE;
+        return;
+      }
+    }
+    catch (\Exception $e) {
+      watchdog('ai_seo_advisor', 'ai_async submit failed, falling back to sync: @m', ['@m' => $e->getMessage()], WATCHDOG_WARNING);
+    }
+  }
+
+  // Fallback to synchronous generation if ai_async is disabled or submit failed.
   $enable_ai = TRUE;
   if ($enable_ai) {
-    $ai_source_html = $used_preview ? $text : $raw_text;
     $ai = ai_seo_advisor_generate_ai_suggestions($title, $ai_source_html, $raw_text, $meta_description, '', $ai_model, $ai_max_tokens, $report_type);
     if (is_array($ai)) {
       $result['ai'] = $ai;
@@ -307,6 +390,8 @@ function ai_seo_advisor_analyze_form_submit($form, &$form_state) {
       'entity_id' => $node->nid,
       'report_type' => $report_type,
       'title' => $title,
+      'score' => isset($result['score']) ? (int) $result['score'] : 0,
+      'status' => isset($result['status']) ? $result['status'] : 'RED',
       'report_data' => $result,
       'html_snapshot' => $html,
     ]);

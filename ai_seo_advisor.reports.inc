@@ -346,6 +346,25 @@ function ai_seo_advisor_analyze($title, $html_or_text, $meta_description, $focus
   $desc = trim((string) $meta_description);
   $text_plain = ai_seo_advisor_to_plain($html_or_text);
 
+  // Lazy DOM loader so DOMDocument is instantiated and parsed at most once per analysis run.
+  $dom = NULL;
+  $dom_tried = FALSE;
+  $get_dom = function() use (&$dom, &$dom_tried, $html_or_text) {
+    if (!$dom_tried) {
+      $dom_tried = TRUE;
+      if (class_exists('DOMDocument')) {
+        $d = new DOMDocument('1.0', 'UTF-8');
+        libxml_use_internal_errors(TRUE);
+        $htmlUtf8 = mb_convert_encoding((string) $html_or_text, 'HTML-ENTITIES', 'UTF-8');
+        if ($d->loadHTML('<!DOCTYPE html><html lang="en"><body>' . $htmlUtf8 . '</body></html>', LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD)) {
+          $dom = $d;
+        }
+        libxml_clear_errors();
+      }
+    }
+    return $dom;
+  };
+
   // Title length.
   if (!empty($ck['title_length'])) {
     $len = backdrop_strlen($title);
@@ -395,41 +414,31 @@ function ai_seo_advisor_analyze($title, $html_or_text, $meta_description, $focus
 
     $counted = FALSE;
 
-    if (class_exists('DOMDocument')) {
-      $dom = new DOMDocument('1.0', 'UTF-8');
-      libxml_use_internal_errors(TRUE);
-      $htmlUtf8 = mb_convert_encoding($html, 'HTML-ENTITIES', 'UTF-8');
-      $loaded = $dom->loadHTML(
-        '<!DOCTYPE html><html lang="en"><body>' . $htmlUtf8 . '</body></html>',
-        LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD
-      );
-      libxml_clear_errors();
+    $d = $get_dom();
+    if ($d) {
+      foreach ($d->getElementsByTagName('a') as $a) {
+        $href = trim($a->getAttribute('href'));
+        if ($href === '') { continue; }
 
-      if ($loaded) {
-        foreach ($dom->getElementsByTagName('a') as $a) {
-          $href = trim($a->getAttribute('href'));
-          if ($href === '') { continue; }
-
-          // Ignore mailto:, tel:, javascript:, etc.
-          if (preg_match('#^[a-z]+:#i', $href) && !preg_match('#^https?://#i', $href)) {
-            continue;
-          }
-
-          if (preg_match('#^https?://#i', $href)) {
-            // Absolute URL: count if host matches site host.
-            if ($base_host) {
-              $h = parse_url($href, PHP_URL_HOST);
-              if ($h !== NULL && strcasecmp($h, $base_host) === 0) {
-                $internal++;
-              }
-            }
-          } else {
-            // Relative URL (starts with /, ?, or a relative path): count as internal.
-            $internal++;
-          }
+        // Ignore mailto:, tel:, javascript:, etc.
+        if (preg_match('#^[a-z]+:#i', $href) && !preg_match('#^https?://#i', $href)) {
+          continue;
         }
-        $counted = TRUE;
+
+        if (preg_match('#^https?://#i', $href)) {
+          // Absolute URL: count if host matches site host.
+          if ($base_host) {
+            $h = parse_url($href, PHP_URL_HOST);
+            if ($h !== NULL && strcasecmp($h, $base_host) === 0) {
+              $internal++;
+            }
+          }
+        } else {
+          // Relative URL (starts with /, ?, or a relative path): count as internal.
+          $internal++;
+        }
       }
+      $counted = TRUE;
     }
 
     // Regex fallback if DOM fails.
@@ -466,19 +475,13 @@ function ai_seo_advisor_analyze($title, $html_or_text, $meta_description, $focus
     $missing_alt_dom = 0;
 
     // DOM parse first.
-    if (class_exists('DOMDocument')) {
-      $dom = new DOMDocument('1.0', 'UTF-8');
-      libxml_use_internal_errors(TRUE);
-      $htmlUtf8 = mb_convert_encoding($html, 'HTML-ENTITIES', 'UTF-8');
-      $loaded = $dom->loadHTML('<!DOCTYPE html><html lang="en"><body>' . $htmlUtf8 . '</body></html>', LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
-      libxml_clear_errors();
-      if ($loaded) {
-        $imgs = $dom->getElementsByTagName('img');
-        $img_count_dom = $imgs->length;
-        foreach ($imgs as $img) {
-          $alt = $img->getAttribute('alt');
-          if ($alt === NULL || trim($alt) === '') { $missing_alt_dom++; }
-        }
+    $d = $get_dom();
+    if ($d) {
+      $imgs = $d->getElementsByTagName('img');
+      $img_count_dom = $imgs->length;
+      foreach ($imgs as $img) {
+        $alt = $img->getAttribute('alt');
+        if ($alt === NULL || trim($alt) === '') { $missing_alt_dom++; }
       }
     }
 
@@ -547,6 +550,33 @@ function ai_seo_advisor_analyze($title, $html_or_text, $meta_description, $focus
  */
 function ai_seo_advisor_generate_ai_suggestions($title, $html_text, $raw_text, $meta_description, $focus, $model, $max_tokens, $report_type = 'full') {
   if (!module_exists('ai')) { return NULL; }
+
+  // Fallback to configured or global default model if empty.
+  if (empty($model)) {
+    $opts = config_get('ai_seo_advisor.settings', 'options');
+    $opts = is_array($opts) ? $opts : [];
+    $model = !empty($opts['ai_model']) ? $opts['ai_model'] : config_get('ai.settings', 'default_text_model');
+    if (empty($model) && function_exists('ai_default_model') && function_exists('ai_get_all_chat_models')) {
+      $model = ai_default_model(ai_get_all_chat_models());
+    }
+  }
+  if (empty($model)) {
+    watchdog('ai_seo_advisor', 'No AI model configured or available for SEO report generation.', [], WATCHDOG_ERROR);
+    return NULL;
+  }
+
+  // Ensure an API provider is available for the selected model.
+  $stripped_model = '';
+  if (function_exists('ai_get_api_for_model') && !ai_get_api_for_model($model, $stripped_model)) {
+    watchdog('ai_seo_advisor', 'No provider configured for SEO advisor model @model.', ['@model' => $model], WATCHDOG_ERROR);
+    return NULL;
+  }
+
+  if (empty($max_tokens)) {
+    $model_bare = (strpos($model, '/') !== FALSE) ? explode('/', $model, 2)[1] : $model;
+    $is_reasoning_model = (bool) preg_match('/^(o1|o3|o4|gpt-5)/i', $model_bare);
+    $max_tokens = $is_reasoning_model ? 16000 : 3000;
+  }
 
   $opts_cfg = is_array(config_get('ai_seo_advisor.settings', 'options')) ? config_get('ai_seo_advisor.settings', 'options') : [];
 
