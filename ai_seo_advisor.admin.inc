@@ -67,7 +67,7 @@ function ai_seo_advisor_settings_form($form, &$form_state) {
   $model_options = ai_get_all_chat_models();
 
   $model_select_disabled = empty($model_options);
-  $default_model_value = ((is_array(config_get('ai_seo_advisor.settings', 'options')) && isset(config_get('ai_seo_advisor.settings', 'options')['ai_model']) && config_get('ai_seo_advisor.settings', 'options')['ai_model'] !== '') ? config_get('ai_seo_advisor.settings', 'options')['ai_model'] : (config_get('ai.settings', 'default_text_model')));
+  $default_model_value = (is_array(config_get('ai_seo_advisor.settings', 'options')) && isset(config_get('ai_seo_advisor.settings', 'options')['ai_model'])) ? (string) config_get('ai_seo_advisor.settings', 'options')['ai_model'] : '';
   $model_description = t('Select which text model to use for AI suggestions.');
   if ($model_select_disabled) {
     $model_description .= ' ' . t('No models were discovered. Configure an AI provider at admin/config/ai/settings to enable model discovery.');
@@ -75,7 +75,7 @@ function ai_seo_advisor_settings_form($form, &$form_state) {
   $form['options']['ai_model'] = [
     '#type' => 'select',
     '#title' => t('AI model'),
-    '#options' => $model_options,
+    '#options' => ai_model_options_with_default($model_options, 'text'),
     '#default_value' => $default_model_value,
     '#description' => $model_description,
     '#attributes' => ['class' => ['ai-seo-model-select']],
