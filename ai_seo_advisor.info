@@ -1,6 +1,7 @@
 name = AI SEO Advisor
 description = AI-powered SEO content recommendations and optimization analysis.
 backdrop = 1.x
+php = 8.2
 type = module
 package = AI
 dependencies[] = ai
